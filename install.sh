@@ -23,7 +23,7 @@ sudo chmod a+x /usr/local/bin/yt-dlp
 echo "🐍 Creating virtual environment and installing required Python libraries..."
 python3 -m venv venv
 source venv/bin/activate
-# Added 'shutil' for file copying and 'uuid' for unique naming
+# Install only necessary libraries
 pip install python-telegram-bot python-dotenv uuid
 
 # 4. Configure Bot Token
@@ -41,7 +41,6 @@ cat << 'EOF_PYTHON_CODE' > $BOT_FILE
 import logging
 import os
 import subprocess
-import shutil # Added for robust file handling
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -99,7 +98,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Send initial message and show waiting status
     message = await update.message.reply_text(f"⏳ Processing your link... This may take a moment.\nLink: `{link}`", parse_mode='Markdown')
     
-    # Define temporary output paths
+    # Define temporary output path using a unique ID
     unique_id = uuid.uuid4().hex
     temp_dir = f"./downloads/{chat_id}"
     os.makedirs(temp_dir, exist_ok=True)
@@ -109,17 +108,18 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     absolute_output_template = os.path.abspath(output_template)
     
     downloaded_filepath = None
-    final_file_path = None
-
+    
     try:
         # --- 1. Execute yt-dlp for download ---
         
+        # New flag: --no-progress to remove status lines from stdout
         command = [
             "yt-dlp",
             "-f", "best",
             "--max-filesize", "50M", 
             "--restrict-filenames",
             "--no-warnings",
+            "--no-progress", # Crucial: prevents status updates from polluting stdout
             "--print", "filepath", 
             link,
             "-o", absolute_output_template
@@ -128,26 +128,18 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Execute command
         process = subprocess.run(command, check=True, capture_output=True, text=True)
         
-        # Get the exact downloaded file path from yt-dlp output
-        # Use strip() to remove potential leading/trailing whitespace/newlines
-        yt_dlp_output_lines = process.stdout.strip().split('\n')
-        downloaded_filepath = yt_dlp_output_lines[-1].strip() # Clean the path string
+        # Clean the stdout and get the last line (which should be the path)
+        yt_dlp_output_lines = [line.strip() for line in process.stdout.strip().split('\n') if line.strip()]
+        downloaded_filepath = yt_dlp_output_lines[-1] if yt_dlp_output_lines else None
         
         # Crucial check: if yt-dlp executed successfully but didn't produce a file path.
         if not downloaded_filepath or not os.path.exists(downloaded_filepath):
-             # Log and raise an error for better debugging
-             logger.error(f"yt-dlp failed to produce file path or file not found at: {downloaded_filepath}")
+             logger.error(f"yt-dlp failed to produce file path or file not found at: {downloaded_filepath}. STDOUT: {process.stdout.strip()}")
+             # If the file is truly not found, we re-raise the error to catch it in the except block
              raise FileNotFoundError(f"Download completed, but file not found at path: {downloaded_filepath}")
         
-        # --- 2. Create a clean, final file path and send the file ---
+        # --- 2. Send File ---
         
-        # Get the file extension
-        _, ext = os.path.splitext(downloaded_filepath)
-        final_file_path = os.path.join(temp_dir, f"final_{unique_id}{ext}")
-        
-        # Move the downloaded file to the simple, final path to avoid any ambiguity
-        shutil.move(downloaded_filepath, final_file_path)
-
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message.message_id,
@@ -156,14 +148,15 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Determine file type for correct sending (video or photo)
         try:
-            mime_type_process = subprocess.run(['file', '-b', '--mime-type', final_file_path], capture_output=True, text=True, check=True)
+            # Use the 'file' command which is more reliable than mimetypes for downloads
+            mime_type_process = subprocess.run(['file', '-b', '--mime-type', downloaded_filepath], capture_output=True, text=True, check=True)
             mime_type = mime_type_process.stdout.strip()
         except subprocess.CalledProcessError:
-            mime_type, _ = mimetypes.guess_type(final_file_path)
+            mime_type, _ = mimetypes.guess_type(downloaded_filepath)
             mime_type = mime_type if mime_type else 'application/octet-stream'
 
 
-        with open(final_file_path, 'rb') as f:
+        with open(downloaded_filepath, 'rb') as f:
             if mime_type.startswith('video'):
                 await context.bot.send_video(
                     chat_id,
@@ -218,10 +211,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     finally:
         # --- 3. Cleanup downloaded files ---
         # Ensure cleanup runs on the known final path
-        if final_file_path and os.path.exists(final_file_path):
-            os.remove(final_file_path)
-            
-        # Clean up the original downloaded file path just in case
         if downloaded_filepath and os.path.exists(downloaded_filepath):
             os.remove(downloaded_filepath)
 
