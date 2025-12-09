@@ -1,12 +1,8 @@
 #!/bin/bash
 
-# --- Section 1: Pre-cleanup and Configuration ---
+# --- Section 1: Configuration ---
 echo "## 🤖 Universal Social Media Downloader Bot (Powered by yt-dlp) ##"
 echo "---"
-
-echo "🗑️ Cleaning up previous installations and stopping old bot..."
-pkill -f python3 universal_downloader.py 2>/dev/null
-rm -rf bot_env universal_downloader.py bot.log downloads 2>/dev/null
 
 # Get Bot Token
 read -p "Please enter your Telegram bot token (e.g., 123456:ABC-DEF): " BOT_TOKEN
