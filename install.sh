@@ -3,8 +3,8 @@
 # =========================================================
 #             Integrated Telegram Downloader Bot Setup
 # =========================================================
-# This script installs dependencies, configures the environment,
-# extracts the Python bot code, and runs the bot in the background.
+# This single script handles the installation, configuration, and execution
+# of a Telegram downloader bot using yt-dlp and Python.
 
 BOT_FILE="bot.py"
 ENV_FILE=".env"
@@ -134,9 +134,8 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         
         # Determine file type for correct sending (video or photo)
-        # Using mimetypes or file command to check content type
+        # Use the 'file' command which is more reliable than mimetypes for downloads
         try:
-             # Use the 'file' command which is more reliable than mimetypes for downloads
             mime_type_process = subprocess.run(['file', '-b', '--mime-type', downloaded_filepath], capture_output=True, text=True, check=True)
             mime_type = mime_type_process.stdout.strip()
         except subprocess.CalledProcessError:
@@ -146,6 +145,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         with open(downloaded_filepath, 'rb') as f:
             if mime_type.startswith('video'):
+                # Removed 'timeout' argument to fix the error
                 await context.bot.send_video(
                     chat_id,
                     video=f,
