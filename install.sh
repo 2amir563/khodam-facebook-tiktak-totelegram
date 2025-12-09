@@ -23,7 +23,7 @@ sudo chmod a+x /usr/local/bin/yt-dlp
 echo "🐍 Creating virtual environment and installing required Python libraries..."
 python3 -m venv venv
 source venv/bin/activate
-# Added 'uuid' library for robust file naming
+# Added 'shutil' for file copying and 'uuid' for unique naming
 pip install python-telegram-bot python-dotenv uuid
 
 # 4. Configure Bot Token
@@ -41,12 +41,13 @@ cat << 'EOF_PYTHON_CODE' > $BOT_FILE
 import logging
 import os
 import subprocess
+import shutil # Added for robust file handling
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import telegram.ext
 import mimetypes
-import uuid # Imported for robust file naming
+import uuid 
 
 # Load bot token from .env file
 load_dotenv()
@@ -98,21 +99,20 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Send initial message and show waiting status
     message = await update.message.reply_text(f"⏳ Processing your link... This may take a moment.\nLink: `{link}`", parse_mode='Markdown')
     
-    # Define temporary output path using a unique ID
+    # Define temporary output paths
     unique_id = uuid.uuid4().hex
     temp_dir = f"./downloads/{chat_id}"
     os.makedirs(temp_dir, exist_ok=True)
-    # Using unique ID in the filename
+    
+    # yt-dlp output template path (in the temporary directory)
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
+    absolute_output_template = os.path.abspath(output_template)
     
     downloaded_filepath = None
-    
+    final_file_path = None
+
     try:
         # --- 1. Execute yt-dlp for download ---
-        
-        # --max-filesize 50M: Telegram file size limit for non-document files
-        # os.path.abspath is used here to ensure the command uses an absolute path for output.
-        absolute_output_template = os.path.abspath(output_template)
         
         command = [
             "yt-dlp",
@@ -120,7 +120,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "--max-filesize", "50M", 
             "--restrict-filenames",
             "--no-warnings",
-            "--print", "filepath", # Prints the final downloaded file path
+            "--print", "filepath", 
             link,
             "-o", absolute_output_template
         ]
@@ -129,15 +129,25 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         process = subprocess.run(command, check=True, capture_output=True, text=True)
         
         # Get the exact downloaded file path from yt-dlp output
-        downloaded_filepath = process.stdout.strip().split('\n')[-1]
-
-        # Crucial check: if yt-dlp executed successfully but didn't produce a file path, raise an error.
+        # Use strip() to remove potential leading/trailing whitespace/newlines
+        yt_dlp_output_lines = process.stdout.strip().split('\n')
+        downloaded_filepath = yt_dlp_output_lines[-1].strip() # Clean the path string
+        
+        # Crucial check: if yt-dlp executed successfully but didn't produce a file path.
         if not downloaded_filepath or not os.path.exists(downloaded_filepath):
-             # This handles cases where yt-dlp fails silently or output parsing fails.
-             raise FileNotFoundError(f"yt-dlp completed, but file not found at path: {downloaded_filepath}")
+             # Log and raise an error for better debugging
+             logger.error(f"yt-dlp failed to produce file path or file not found at: {downloaded_filepath}")
+             raise FileNotFoundError(f"Download completed, but file not found at path: {downloaded_filepath}")
         
-        # --- 2. Send File ---
+        # --- 2. Create a clean, final file path and send the file ---
         
+        # Get the file extension
+        _, ext = os.path.splitext(downloaded_filepath)
+        final_file_path = os.path.join(temp_dir, f"final_{unique_id}{ext}")
+        
+        # Move the downloaded file to the simple, final path to avoid any ambiguity
+        shutil.move(downloaded_filepath, final_file_path)
+
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message.message_id,
@@ -146,15 +156,14 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Determine file type for correct sending (video or photo)
         try:
-            # Use the 'file' command which is more reliable than mimetypes for downloads
-            mime_type_process = subprocess.run(['file', '-b', '--mime-type', downloaded_filepath], capture_output=True, text=True, check=True)
+            mime_type_process = subprocess.run(['file', '-b', '--mime-type', final_file_path], capture_output=True, text=True, check=True)
             mime_type = mime_type_process.stdout.strip()
         except subprocess.CalledProcessError:
-            mime_type, _ = mimetypes.guess_type(downloaded_filepath)
+            mime_type, _ = mimetypes.guess_type(final_file_path)
             mime_type = mime_type if mime_type else 'application/octet-stream'
 
 
-        with open(downloaded_filepath, 'rb') as f:
+        with open(final_file_path, 'rb') as f:
             if mime_type.startswith('video'):
                 await context.bot.send_video(
                     chat_id,
@@ -176,7 +185,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
 
     except FileNotFoundError as e:
-        # Catch the specific FileNotFoundError for better user feedback
+        # Handles the raised custom error and official FileNotFoundError
         error_message = f"❌ File Not Found Error: The downloaded file could not be located on the server. Please ensure the link is valid and public."
         await context.bot.edit_message_text(
             chat_id=chat_id,
@@ -208,8 +217,14 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     finally:
         # --- 3. Cleanup downloaded files ---
+        # Ensure cleanup runs on the known final path
+        if final_file_path and os.path.exists(final_file_path):
+            os.remove(final_file_path)
+            
+        # Clean up the original downloaded file path just in case
         if downloaded_filepath and os.path.exists(downloaded_filepath):
             os.remove(downloaded_filepath)
+
         # Cleanup temporary directory (if empty)
         if os.path.exists(temp_dir) and not os.listdir(temp_dir):
             try:
