@@ -1,161 +1,219 @@
 #!/bin/bash
 
-# --- Section 1: Configuration ---
-echo "## 🤖 Universal Social Media Downloader Bot (Powered by yt-dlp) ##"
-echo "---"
+# =========================================================
+#             اسکریپت نصب یکپارچه ربات دانلودر تلگرام
+# =========================================================
+# این فایل شامل کد Shell (برای نصب و اجرا) و کد Python (منطق ربات) است.
 
-# Get Bot Token
-read -p "Please enter your Telegram bot token (e.g., 123456:ABC-DEF): " BOT_TOKEN
+BOT_FILE="bot.py"
+ENV_FILE=".env"
 
-# --- Section 2: Install Prerequisites and VENV Setup ---
-echo "---"
-echo "🛠️ Installing system prerequisites (Python3, pip, venv, git, and FFmpeg)..."
-# yt-dlp requires FFmpeg for some operations (like stitching video/audio)
-sudo apt update > /dev/null 2>&1
-sudo apt install -y python3 python3-pip python3-venv git ffmpeg > /dev/null 2>&1
+# ۱. به‌روزرسانی بسته‌ها و نصب پیش‌نیازها
+echo "🛠️ به‌روزرسانی بسته‌های سیستمی و نصب Python، Git و Curl..."
+sudo apt update
+sudo apt install -y python3 python3-pip git curl
 
-# Create and activate a virtual environment (VENV)
-echo "⚙️ Setting up virtual environment..."
-python3 -m venv bot_env
-source bot_env/bin/activate
+# ۲. نصب yt-dlp (ابزار کلیدی دانلود)
+echo "⬇️ نصب yt-dlp برای مدیریت دانلودها..."
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+sudo chmod a+x /usr/local/bin/yt-dlp
 
-# --- Section 3: Install Libraries inside VENV ---
-echo "📚 Installing Python libraries (yt-dlp and python-telegram-bot) inside VENV..."
-pip install yt-dlp python-telegram-bot > /dev/null 2>&1
+# ۳. ایجاد محیط مجازی و نصب کتابخانه‌های پایتون
+echo "🐍 ایجاد محیط مجازی و نصب کتابخانه‌های لازم..."
+python3 -m venv venv
+source venv/bin/activate
+pip install python-telegram-bot python-dotenv
 
-# --- Section 4: Create and Configure Python File (Bot Logic) ---
-PYTHON_SCRIPT_NAME="universal_downloader.py"
-echo "🐍 Creating bot file ($PYTHON_SCRIPT_NAME) and injecting token..."
+# ۴. تنظیم توکن ربات
+echo "🤖 لطفاً توکن ربات تلگرام خود را وارد کنید (دریافتی از BotFather):"
+read BOT_TOKEN
+echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
+echo "توکن در فایل $ENV_FILE ذخیره شد."
 
-# Full Python bot content using V20+ structure and yt-dlp
-cat << EOF > $PYTHON_SCRIPT_NAME
-import telegram
-from telegram.ext import Application, MessageHandler, filters
-from telegram import Update
-import yt_dlp
+# ۵. استخراج کد پایتون و ذخیره در فایل bot.py
+echo "📝 استخراج و ذخیره کد منطق ربات در فایل $BOT_FILE..."
+cat << 'EOF_PYTHON_CODE' > $BOT_FILE
+# =========================================================
+#                       bot.py (منطق ربات)
+# =========================================================
+import logging
 import os
-import re
-from uuid import uuid4
+import subprocess
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+import asyncio
+import telegram.ext
 
-# Configuration: Injected from the install script
-TOKEN = "$BOT_TOKEN"
+# توکن ربات را از فایل .env بارگذاری می‌کند
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Increase timeouts to prevent TimedOut errors during long downloads/uploads
-TELEGRAM_READ_TIMEOUT = 45
-TELEGRAM_WRITE_TIMEOUT = 45
-TELEGRAM_POOL_TIMEOUT = 90
-MAX_FILE_SIZE_MB = 2000 # Telegram limit is 2048 MB
+# تنظیمات لاگ‌گیری
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def get_yt_dlp_options(output_path):
-    """Sets options for yt-dlp to handle file size and output format."""
-    return {
-        'outtmpl': f'{output_path}/%(title)s.%(ext)s',
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'merge_output_format': 'mp4',
-        'noplaylist': True,
-        'writesubtitles': True,
-        'subtitlesformat': 'srt/best',
-        'postprocessors': [{
-            'key': 'FFmpegVideoRemuxer',
-            'preferedformat': 'mp4',
-        }],
-        # Limit file size slightly below the Telegram maximum
-        'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024, 
-    }
+# فهرست دامنه های پشتیبانی شده (توسط yt-dlp)
+SUPPORTED_DOMAINS = [
+    "tiktok.com", "facebook.com", "fb.watch", "terabox.com", "loom.com", 
+    "streamable.com", "pinterest.com", "pin.it", "snapchat.com/spotlight"
+]
 
-async def handle_message(update: Update, context):
-    text = update.message.text
-    chat_id = update.message.chat_id
+# تابع Start
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """پاسخ به دستور /start."""
+    welcome_message = (
+        "👋 خوش آمدید! من یک ربات دانلودر هستم.\n\n"
+        "لینک مورد نظر خود را از پلتفرم‌های زیر برای من ارسال کنید:\n"
+        "🔸 **TikTok**\n"
+        "🔸 **Facebook**\n"
+        "🔸 **Terabox** (ویدیو)\n"
+        "🔸 **Loom** (ویدیو)\n"
+        "🔸 **Streamable**\n"
+        "🔸 **Pinterest** (تصویر و ویدیو)\n"
+        "🔸 **Snapchat Spotlights**\n\n"
+        "**توجه:** فقط لینک‌های عمومی و بدون محدودیت دانلود می‌شوند."
+    )
+    await update.message.reply_text(welcome_message)
+
+# تابع اصلی پردازش لینک و دانلود
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """لینک دریافت شده را با yt-dlp دانلود کرده و فایل را می‌فرستد."""
     
-    # Simple check for any HTTP link
-    url_match = re.search(r'https?://[^\s]+', text)
-    if not url_match:
-        await update.message.reply_text("Please send a valid public link (TikTok, Facebook, Pinterest, Loom, Terabox, Streamable, etc.).")
+    chat_id = update.message.chat_id
+    link = update.message.text.strip()
+    
+    logger.info(f"Received link from {chat_id}: {link}")
+
+    # بررسی لینک برای جلوگیری از پردازش غیرضروری
+    if not any(domain in link.lower() for domain in SUPPORTED_DOMAINS):
+        await update.message.reply_text(
+            "⚠️ این دامنه پشتیبانی نمی‌شود یا لینک معتبر نیست. لطفاً یک لینک از پلتفرم‌های ذکر شده ارسال کنید."
+        )
         return
 
-    video_url = url_match.group(0)
+    # ارسال پیام اولیه و نشان دادن وضعیت انتظار
+    message = await update.message.reply_text(f"⏳ در حال پردازش لینک شما... ممکن است کمی طول بکشد.\nلینک: `{link}`", parse_mode='Markdown')
     
-    # 1. Start message and create unique temp directory
-    await context.bot.send_message(chat_id, "⏳ Processing and attempting to download link... Please wait.", disable_web_page_preview=True)
-    
-    temp_dir = f'downloads/{uuid4()}'
+    # تعیین نام فایل موقت خروجی
+    temp_dir = f"./downloads/{chat_id}"
     os.makedirs(temp_dir, exist_ok=True)
-
+    # از %()s برای جلوگیری از تداخل نام‌ها و دریافت مسیر دقیق فایل استفاده می‌کنیم
+    output_template = os.path.join(temp_dir, "downloaded_file.%(ext)s")
+    
+    downloaded_filepath = None
+    
     try:
-        ydl_opts = get_yt_dlp_options(temp_dir)
+        # --- ۱. اجرای yt-dlp برای دانلود ---
+        # --max-filesize 50M: محدودیت حجم (برای تلگرام)
+        command = [
+            "yt-dlp",
+            "-f", "best",
+            "--max-filesize", "50M", 
+            "--restrict-filenames",
+            "--no-warnings",
+            "--print", "filepath", 
+            link,
+            "-o", output_template
+        ]
         
-        # 2. Download the media using yt-dlp
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(video_url, download=True)
-            # Find the actual output file name
-            file_name = ydl.prepare_filename(info_dict)
-            
-        # If yt-dlp successfully downloaded the file
-        downloaded_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if not f.endswith(('.part', '.temp', '.json', '.description'))]
+        # اجرای دستور در ترمینال
+        process = subprocess.run(command, check=True, capture_output=True, text=True)
         
-        if not downloaded_files:
-             await context.bot.send_message(chat_id, "❌ Error: Could not download the media. (Might be private, unsupported, or geo-restricted).")
-             return
+        # مسیر دقیق فایل دانلود شده را از خروجی yt-dlp دریافت می‌کنیم
+        downloaded_filepath = process.stdout.strip().split('\n')[-1]
+        
+        # --- ۲. ارسال فایل ---
+        
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            text="✅ دانلود تکمیل شد. در حال ارسال فایل..."
+        )
+        
+        # بررسی نوع فایل برای ارسال صحیح (ویدیو یا عکس)
+        # استفاده از دستور file برای تشخیص نوع محتوا
+        mime_type_process = subprocess.run(['file', '-b', '--mime-type', downloaded_filepath], capture_output=True, text=True, check=True)
+        mime_type = mime_type_process.stdout.strip()
 
-        file_path = downloaded_files[0]
-        
-        # 3. Determine media type and prepare caption
-        is_video = any(ext in file_path.lower() for ext in ['.mp4', '.webm', '.mov', '.mkv'])
-        
-        # Extract title and uploader for caption
-        title = info_dict.get('title', 'N/A')
-        uploader = info_dict.get('uploader', 'N/A')
-        caption = f"✅ **Title:** {title}\n**Source:** {uploader}\n**Downloaded via:** @{context.bot.username}"
-        
-        # 4. Send media
-        if os.path.getsize(file_path) > MAX_FILE_SIZE_MB * 1024 * 1024:
-             await context.bot.send_message(chat_id, "❌ File is too large. (Telegram limit: 2 GB)")
-        elif is_video:
-            with open(file_path, 'rb') as video_file:
-                # Use a higher timeout for video upload
-                await context.bot.send_video(chat_id, video_file, caption=caption, timeout=600, supports_streaming=True, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        if mime_type.startswith('video'):
+            await context.bot.send_video(
+                chat_id,
+                video=open(downloaded_filepath, 'rb'),
+                caption=f"🎥 دانلود از: {link}",
+                supports_streaming=True
+            )
+        elif mime_type.startswith('image'):
+            await context.bot.send_photo(
+                chat_id,
+                photo=open(downloaded_filepath, 'rb'),
+                caption=f"🖼 دانلود از: {link}"
+            )
         else:
-            # Assume image/other file type
-            with open(file_path, 'rb') as media_file:
-                await context.bot.send_document(chat_id, media_file, caption=caption, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+            await context.bot.send_document(
+                chat_id,
+                document=open(downloaded_filepath, 'rb'),
+                caption=f"📄 دانلود از: {link}"
+            )
+
+    except subprocess.CalledProcessError as e:
+        error_message = f"❌ خطایی هنگام دانلود رخ داد:\n\n`{e.stderr.splitlines()[-1]}`"
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            text=error_message,
+            parse_mode='Markdown'
+        )
+        logger.error(f"yt-dlp error: {e.stderr}")
         
     except Exception as e:
-        error_message = f"❌ A processing error occurred: {str(e)}"
-        if "Unsupported URL" in str(e):
-             error_message += "\n\n(This URL is either not supported by yt-dlp or the post is private.)"
-        await context.bot.send_message(chat_id, error_message)
+        error_message = f"❌ خطای نامشخص در ربات: {type(e).__name__}"
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            text=error_message
+        )
+        logger.error(f"Unknown error: {e}")
+
     finally:
-        # 5. Clean up temporary directory
-        if os.path.exists(temp_dir):
-            os.system(f'rm -rf {temp_dir}')
-
-def main():
-    # FIX: Increased timeouts to prevent TimedOut error during polling
-    application = Application.builder().token(TOKEN).read_timeout(TELEGRAM_READ_TIMEOUT).write_timeout(TELEGRAM_WRITE_TIMEOUT).pool_timeout(TELEGRAM_POOL_TIMEOUT).build()
+        # --- ۳. پاکسازی فایل‌های دانلود شده ---
+        if downloaded_filepath and os.path.exists(downloaded_filepath):
+            os.remove(downloaded_filepath)
+        # پاکسازی پوشه موقت (اگر خالی باشد)
+        if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+            os.rmdir(temp_dir)
         
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Start polling (blocking call)
-    application.run_polling()
+def main() -> None:
+    """راه‌اندازی و اجرای ربات."""
+    if not BOT_TOKEN:
+        logger.error("🚨 توکن ربات (BOT_TOKEN) در فایل .env تنظیم نشده است.")
+        return
 
-if __name__ == '__main__':
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(telegram.ext.CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
+
+    logger.info("🟢 ربات دانلودر شروع به کار کرد. (Polling)")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
     main()
-EOF
+EOF_PYTHON_CODE
 
-# --- Section 5: Run the Bot ---
-echo "---"
-echo "🚀 Running the bot inside the VENV in the background..."
+# ۶. اجرای ربات
+echo "🚀 اجرای ربات..."
 
-# Execute the bot using the specific Python interpreter inside the VENV
-nohup ./bot_env/bin/python $PYTHON_SCRIPT_NAME > bot.log 2>&1 &
+# فعال‌سازی محیط مجازی
+source venv/bin/activate
 
-# Deactivate the shell environment
-deactivate 2>/dev/null
+# اجرای ربات در پس‌زمینه با nohup
+nohup python3 $BOT_FILE &
 
-echo "---"
-echo "✅ **Bot successfully installed and running.**"
-echo "The bot is public and ready to receive links. Use 'tail -f bot.log' to monitor."
-echo "---"
-echo "📜 Useful Commands:"
-echo "* To view logs: 'tail -f bot.log'"
-echo "* To stop the bot: 'pkill -f python3 $PYTHON_SCRIPT_NAME'"
+echo ""
+echo "--------------------------------------------------------"
+echo "✅ نصب و اجرای ربات تکمیل شد."
+echo "💡 ربات در پس‌زمینه در حال اجرا است."
+echo "💡 برای مشاهده وضعیت ربات: cat nohup.out"
+echo "💡 برای متوقف کردن ربات: pkill -f $BOT_FILE"
+echo "--------------------------------------------------------"
