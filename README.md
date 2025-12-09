@@ -4,6 +4,29 @@
 bash <(curl -s https://raw.githubusercontent.com/2amir563/khodam-facebook-tiktak-totelegram/main/install.sh)
 ```
 
+📋 Next steps:
+1. Go to bot directory:
+   cd /root/telegram-video-bot
+
+2. Setup bot token:
+   ./setup.sh
+
+```
+cd /root/telegram-video-bot
+./setup.sh
+```
+3. Start bot:
+
+```
+./start.sh
+```
+
+   ./start.sh
+
+5. Or run as service:
+   systemctl daemon-reload
+   systemctl enable telegram-bot
+   systemctl start telegram-bot
 
 ## دستور نصب یک خطی:
 
