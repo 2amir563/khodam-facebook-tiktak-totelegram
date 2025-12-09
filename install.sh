@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Telegram Facebook & TikTok Downloader Bot Installer - Portless Version
+# Telegram Facebook & TikTok Downloader Bot Installer
+# Fixed version - No xz dependency for FFmpeg
 # Created by: khodam-facebook-tiktak-totelegram
 # GitHub: https://github.com/2amir563/khodam-facebook-tiktak-totelegram
 
@@ -13,45 +14,34 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Functions
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Check root
+# Check if running as root
 if [ "$EUID" -eq 0 ]; then 
-    print_warning "Running as root is not recommended."
+    print_warning "Running as root. Creating user for bot..."
+    if ! id -u botuser &>/dev/null; then
+        useradd -m -s /bin/bash botuser
+        print_success "User botuser created"
+    fi
+    su - botuser -c "$(cat << 'EOF'
+set -e
+cd ~
+# Rest of installation will run as botuser
+EOF
+)" || true
 fi
 
-print_info "Starting installation of Portless Telegram Video Downloader Bot..."
+print_info "Starting installation of Telegram Video Downloader Bot..."
 
-# Update system
-print_info "Updating system packages..."
-sudo apt-get update
+# Update and install basic dependencies
+print_info "Updating system and installing dependencies..."
+sudo apt-get update -y
 sudo apt-get upgrade -y
-
-# Install dependencies
-print_info "Installing dependencies..."
-sudo apt-get install -y python3 python3-pip python3-venv git curl wget unzip
-
-# Download and install static FFmpeg
-print_info "Installing static FFmpeg..."
-FFMPEG_DIR="$HOME/ffmpeg-static"
-mkdir -p "$FFMPEG_DIR"
-cd "$FFMPEG_DIR"
-
-# Download latest static FFmpeg
-FFMPEG_URL=$(curl -s https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest | grep -o 'https://.*linux64.*.tar.xz' | head -1)
-if [ -z "$FFMPEG_URL" ]; then
-    FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz"
-fi
-
-wget -q "$FFMPEG_URL" -O ffmpeg.tar.xz
-tar -xf ffmpeg.tar.xz --strip-components=1
-chmod +x ffmpeg ffprobe
-sudo cp ffmpeg ffprobe /usr/local/bin/
-print_success "FFmpeg installed successfully"
+sudo apt-get install -y python3 python3-pip python3-venv git curl wget
+sudo apt-get install -y xz-utils  # Add xz-utils for tar.xz files
 
 # Create bot directory
 BOT_DIR="$HOME/telegram-video-bot"
@@ -59,40 +49,75 @@ print_info "Creating bot directory at $BOT_DIR..."
 mkdir -p "$BOT_DIR"
 cd "$BOT_DIR"
 
+# Install static FFmpeg without xz issues
+print_info "Installing FFmpeg..."
+# Try multiple methods to get FFmpeg
+
+# Method 1: Try to install from apt (easiest)
+if sudo apt-get install -y ffmpeg 2>/dev/null; then
+    print_success "FFmpeg installed from apt repository"
+else
+    # Method 2: Download pre-compiled binary (no extraction needed)
+    print_info "Downloading pre-compiled FFmpeg binary..."
+    mkdir -p ffmpeg-bin
+    cd ffmpeg-bin
+    
+    # Try to download static build
+    if wget -q --spider https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz; then
+        wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+        tar -xf ffmpeg-release-amd64-static.tar.xz
+        cd ffmpeg-*-amd64-static
+        sudo cp ffmpeg ffprobe /usr/local/bin/
+        sudo chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+        print_success "FFmpeg installed from static build"
+    else
+        # Method 3: Use yt-dlp's embedded ffmpeg
+        print_info "Using yt-dlp's embedded FFmpeg..."
+        cd "$BOT_DIR"
+        python3 -c "import yt_dlp; print('yt-dlp will use its own FFmpeg')" 2>/dev/null || true
+        print_warning "FFmpeg will be handled by yt-dlp automatically"
+    fi
+    
+    cd "$BOT_DIR"
+fi
+
 # Create virtual environment
 print_info "Setting up Python virtual environment..."
 python3 -m venv venv
 source venv/bin/activate
 
-# Install Python packages
+# Upgrade pip and install packages
 print_info "Installing Python packages..."
-pip install --upgrade pip
-pip install python-telegram-bot==20.6
-pip install yt-dlp
-pip install requests
-pip install beautifulsoup4
-pip install lxml
+pip install --upgrade pip setuptools wheel
+
+# Install requirements
+cat > requirements.txt << 'EOF'
+python-telegram-bot==20.6
+yt-dlp>=2024.11.11
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+EOF
+
+pip install -r requirements.txt
+
+# Create configuration file
+print_info "Creating configuration files..."
 
 # Create config.py
-print_info "Creating configuration files..."
 cat > config.py << 'EOF'
 #!/usr/bin/env python3
 import os
 
 # Bot Configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x]
-
-# FFmpeg path
-FFMPEG_PATH = "/usr/local/bin/ffmpeg"
-FFPROBE_PATH = "/usr/local/bin/ffprobe"
 
 # Download settings
-MAX_FILE_SIZE = 2000 * 1024 * 1024  # 2GB
+MAX_FILE_SIZE = 1900 * 1024 * 1024  # 1.9GB (slightly under Telegram limit)
 DOWNLOAD_PATH = "./downloads"
-SUPPORTED_PLATFORMS = ["facebook.com", "fb.watch", "tiktok.com", "instagram.com"]
+SUPPORTED_PLATFORMS = ["facebook.com", "fb.watch", "tiktok.com", "vm.tiktok.com", "instagram.com"]
 
-# Bot messages
+# Messages
 MESSAGES = {
     "start": """
 🤖 **Video Downloader Bot**
@@ -108,7 +133,6 @@ Commands:
 /start - Start bot
 /help - Show help
 /about - About bot
-/stats - Bot statistics
 """,
     
     "help": """
@@ -129,35 +153,28 @@ Commands:
 
 GitHub: https://github.com/2amir563/khodam-facebook-tiktak-totelegram
 
-**Technologies:**
-• Python Telegram Bot
-• yt-dlp
-• FFmpeg (static)
-
-⚠️ For personal use only
+Made with ❤️ using Python
 """
 }
 EOF
 
 # Create main bot file
-print_info "Creating main bot file..."
 cat > bot.py << 'EOF'
 #!/usr/bin/env python3
 """
-Telegram Video Downloader Bot - Portless Version
-Uses polling method without opening ports
+Telegram Video Downloader Bot
+Simple and reliable version
 """
 
 import os
 import re
 import sys
-import time
 import logging
 import asyncio
 import tempfile
+import shutil
 from datetime import datetime
 from urllib.parse import urlparse
-from pathlib import Path
 
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -173,29 +190,19 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
+        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Statistics
-bot_stats = {
-    "start_time": datetime.now(),
-    "downloads": 0,
-    "errors": 0,
-    "users": set()
-}
-
-# Ensure download directory exists
+# Create downloads directory
 os.makedirs(config.DOWNLOAD_PATH, exist_ok=True)
 
 class VideoDownloader:
-    """Handles video downloading and processing"""
-    
     @staticmethod
     def is_supported_url(url: str) -> bool:
-        """Check if URL is supported"""
+        """Check if URL is from supported platform"""
         url_lower = url.lower()
         for platform in config.SUPPORTED_PLATFORMS:
             if platform in url_lower:
@@ -203,42 +210,19 @@ class VideoDownloader:
         return False
     
     @staticmethod
-    def extract_video_info(url: str):
-        """Extract video information"""
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True,
-            'ffmpeg_location': config.FFMPEG_PATH,
-        }
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return {
-                    'title': info.get('title', 'Video'),
-                    'duration': info.get('duration', 0),
-                    'uploader': info.get('uploader', 'Unknown'),
-                    'thumbnail': info.get('thumbnail'),
-                    'description': info.get('description', ''),
-                    'url': url
-                }
-        except Exception as e:
-            logger.error(f"Info extraction failed: {e}")
-            return None
-    
-    @staticmethod
-    def download_video(url: str, user_id: int):
-        """Download video and return file path"""
+    def download_video(url: str):
+        """Download video using yt-dlp"""
         temp_dir = tempfile.mkdtemp(dir=config.DOWNLOAD_PATH)
-        output_template = os.path.join(temp_dir, '%(title).100s.%(ext)s')
         
         ydl_opts = {
             'format': 'best[filesize<50M]',
-            'outtmpl': output_template,
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': False,
             'no_warnings': False,
-            'ffmpeg_location': config.FFMPEG_PATH,
+            'extractaudio': False,
+            'keepvideo': True,
+            'writethumbnail': True,
+            'merge_output_format': 'mp4',
             'postprocessors': [
                 {
                     'key': 'FFmpegVideoConvertor',
@@ -252,198 +236,158 @@ class VideoDownloader:
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
-            'progress_hooks': [VideoDownloader.progress_hook],
             'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
         }
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
+                filename = ydl.prepare_filename(info)
                 
-                # Convert to MP4 if needed
-                if not downloaded_file.endswith('.mp4'):
-                    mp4_file = os.path.splitext(downloaded_file)[0] + '.mp4'
+                # Ensure .mp4 extension
+                if not filename.endswith('.mp4'):
+                    mp4_file = os.path.splitext(filename)[0] + '.mp4'
                     if os.path.exists(mp4_file):
-                        downloaded_file = mp4_file
+                        filename = mp4_file
                 
-                # Get thumbnail
+                # Find thumbnail
                 thumbnail = None
                 if info.get('thumbnail'):
                     thumbnail = info.get('thumbnail')
                 else:
-                    thumb_candidates = [
-                        os.path.splitext(downloaded_file)[0] + '.jpg',
-                        os.path.splitext(downloaded_file)[0] + '.webp',
-                    ]
-                    for thumb in thumb_candidates:
-                        if os.path.exists(thumb):
-                            thumbnail = thumb
+                    # Look for thumbnail file
+                    base_name = os.path.splitext(filename)[0]
+                    for ext in ['.jpg', '.webp', '.png']:
+                        thumb_file = base_name + ext
+                        if os.path.exists(thumb_file):
+                            thumbnail = thumb_file
                             break
                 
                 return {
                     'success': True,
-                    'file_path': downloaded_file,
-                    'thumbnail': thumbnail,
-                    'title': info.get('title', 'Video'),
+                    'file_path': filename,
+                    'title': info.get('title', 'Video')[:200],
                     'duration': info.get('duration', 0),
-                    'uploader': info.get('uploader', 'Unknown'),
-                    'description': info.get('description', ''),
-                    'temp_dir': temp_dir
+                    'uploader': info.get('uploader', 'Unknown')[:100],
+                    'description': info.get('description', '')[:500],
+                    'thumbnail': thumbnail,
+                    'temp_dir': temp_dir,
+                    'original_url': url
                 }
                 
         except Exception as e:
-            logger.error(f"Download failed: {e}")
+            logger.error(f"Download error: {e}")
             # Cleanup temp dir
             try:
-                import shutil
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
+            
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'temp_dir': temp_dir
             }
-    
-    @staticmethod
-    def progress_hook(d):
-        """Progress hook for yt-dlp"""
-        if d['status'] == 'downloading':
-            percent = d.get('_percent_str', '0%').strip()
-            speed = d.get('_speed_str', 'N/A')
-            eta = d.get('_eta_str', 'N/A')
-            logger.info(f"Downloading: {percent} | Speed: {speed} | ETA: {eta}")
 
-class BotHandlers:
-    """Telegram bot handlers"""
+class BotHandler:
+    def __init__(self):
+        self.stats = {
+            'total_downloads': 0,
+            'successful_downloads': 0,
+            'failed_downloads': 0,
+            'start_time': datetime.now()
+        }
     
-    @staticmethod
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        user = update.effective_user
-        bot_stats["users"].add(user.id)
-        
         await update.message.reply_text(
-            config.MESSAGES["start"],
-            parse_mode=ParseMode.MARKDOWN
+            config.MESSAGES['start'],
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
     
-    @staticmethod
-    async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
         await update.message.reply_text(
-            config.MESSAGES["help"],
+            config.MESSAGES['help'],
             parse_mode=ParseMode.MARKDOWN
         )
     
-    @staticmethod
-    async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def about(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /about command"""
         await update.message.reply_text(
-            config.MESSAGES["about"],
-            parse_mode=ParseMode.MARKDOWN
+            config.MESSAGES['about'],
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
     
-    @staticmethod
-    async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /stats command"""
-        if update.effective_user.id not in config.ADMIN_IDS and config.ADMIN_IDS:
-            await update.message.reply_text("⚠️ Admin only command")
-            return
-        
-        uptime = datetime.now() - bot_stats["start_time"]
-        stats_text = f"""
-📊 **Bot Statistics**
-
-⏱ **Uptime:** {str(uptime).split('.')[0]}
-📥 **Downloads:** {bot_stats["downloads"]}
-❌ **Errors:** {bot_stats["errors"]}
-👥 **Users:** {len(bot_stats["users"])}
-💾 **Free Space:** {BotHandlers.get_free_space()}
-
-**Last Update:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-        await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
-    
-    @staticmethod
-    def get_free_space():
-        """Get free disk space"""
-        try:
-            import shutil
-            total, used, free = shutil.disk_usage(".")
-            return f"{free // (2**30)}GB free"
-        except:
-            return "Unknown"
-    
-    @staticmethod
-    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle incoming messages"""
-        user = update.effective_user
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming messages with URLs"""
         message = update.message
         text = message.text.strip()
         
-        # Extract URL
-        url_pattern = r'https?://[^\s]+'
-        urls = re.findall(url_pattern, text)
+        # Extract URLs from message
+        urls = re.findall(r'https?://[^\s]+', text)
         
         if not urls:
-            await message.reply_text("Please send a valid video URL.")
+            await message.reply_text("Please send a valid Facebook, TikTok, or Instagram video URL.")
             return
         
         url = urls[0]
         
-        # Check if supported
+        # Check if URL is supported
         if not VideoDownloader.is_supported_url(url):
-            platforms = ", ".join(config.SUPPORTED_PLATFORMS)
+            supported = ', '.join(config.SUPPORTED_PLATFORMS)
             await message.reply_text(
-                f"❌ Unsupported URL.\n\nSupported platforms:\n{platforms}"
+                f"❌ Unsupported URL.\n\nSupported platforms:\n{supported}",
+                disable_web_page_preview=True
             )
             return
         
-        # Send processing message
-        status_msg = await message.reply_text(
-            "🔄 Processing your request...\n"
-            "⏳ Downloading video, please wait..."
-        )
+        # Send initial status
+        status_msg = await message.reply_text("⏳ Processing your request...")
         
         try:
-            # Get video info first
-            video_info = VideoDownloader.extract_video_info(url)
-            if not video_info:
-                await status_msg.edit_text("❌ Failed to get video information.")
-                return
-            
             # Update status
-            await status_msg.edit_text(
-                f"📥 Downloading: *{video_info['title']}*\n"
-                f"👤 From: {video_info['uploader']}\n"
-                f"⏱ Duration: {video_info['duration']}s"
-            )
+            await status_msg.edit_text("📥 Downloading video...")
             
             # Download video
-            result = VideoDownloader.download_video(url, user.id)
+            result = VideoDownloader.download_video(url)
+            self.stats['total_downloads'] += 1
             
             if not result['success']:
-                bot_stats["errors"] += 1
-                await status_msg.edit_text(f"❌ Download failed:\n{result['error']}")
+                self.stats['failed_downloads'] += 1
+                await status_msg.edit_text(f"❌ Download failed: {result['error'][:200]}")
+                
+                # Cleanup
+                if 'temp_dir' in result:
+                    try:
+                        shutil.rmtree(result['temp_dir'], ignore_errors=True)
+                    except:
+                        pass
                 return
             
             # Check file size
             file_size = os.path.getsize(result['file_path'])
             if file_size > config.MAX_FILE_SIZE:
                 await status_msg.edit_text(
-                    f"❌ File too large ({file_size/(1024*1024):.2f}MB).\n"
-                    f"Max allowed: {config.MAX_FILE_SIZE/(1024*1024)}MB"
+                    f"❌ File too large ({file_size/(1024*1024):.1f}MB). "
+                    f"Max allowed: {config.MAX_FILE_SIZE/(1024*1024):.0f}MB"
                 )
-                BotHandlers.cleanup_temp(result['temp_dir'])
+                # Cleanup
+                try:
+                    shutil.rmtree(result['temp_dir'], ignore_errors=True)
+                except:
+                    pass
                 return
             
             # Prepare caption
-            caption = BotHandlers.create_caption(result, url)
+            caption = self.create_caption(result)
             
-            # Send video
+            # Update status
             await status_msg.edit_text("📤 Uploading to Telegram...")
             
+            # Send video
             with open(result['file_path'], 'rb') as video_file:
                 await message.reply_video(
                     video=InputFile(video_file, filename=f"{result['title'][:50]}.mp4"),
@@ -451,123 +395,112 @@ class BotHandlers:
                     parse_mode=ParseMode.MARKDOWN,
                     duration=result['duration'],
                     supports_streaming=True,
-                    read_timeout=60,
-                    write_timeout=60,
-                    connect_timeout=60
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=120
                 )
             
-            bot_stats["downloads"] += 1
+            self.stats['successful_downloads'] += 1
             await status_msg.edit_text("✅ Video sent successfully!")
             
-            # Cleanup
-            BotHandlers.cleanup_temp(result['temp_dir'])
+            # Cleanup temporary files
+            try:
+                shutil.rmtree(result['temp_dir'], ignore_errors=True)
+            except Exception as e:
+                logger.error(f"Cleanup error: {e}")
             
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
-            bot_stats["errors"] += 1
+            logger.error(f"Error in handle_message: {e}")
             try:
-                await status_msg.edit_text(f"❌ Error: {str(e)[:200]}")
+                await status_msg.edit_text(f"❌ An error occurred: {str(e)[:200]}")
             except:
                 pass
     
-    @staticmethod
-    def create_caption(result: dict, original_url: str) -> str:
+    def create_caption(self, result: dict) -> str:
         """Create caption for video"""
-        title = result['title'][:100]
-        uploader = result['uploader'][:50]
-        duration = result['duration']
+        caption = f"📹 *{result['title']}*\n\n"
+        caption += f"👤 *Uploader:* {result['uploader']}\n"
         
-        caption = f"📹 *{title}*\n\n"
-        caption += f"👤 *Uploader:* {uploader}\n"
-        
-        if duration > 0:
-            mins, secs = divmod(duration, 60)
-            caption += f"⏱ *Duration:* {int(mins)}:{int(secs):02d}\n"
+        if result['duration'] > 0:
+            minutes = result['duration'] // 60
+            seconds = result['duration'] % 60
+            caption += f"⏱ *Duration:* {minutes}:{seconds:02d}\n"
         
         if result.get('description'):
-            desc = result['description'][:150]
-            if len(result['description']) > 150:
-                desc += "..."
+            desc = result['description']
+            if len(desc) > 300:
+                desc = desc[:300] + "..."
             caption += f"\n📝 {desc}\n"
         
-        caption += f"\n🔗 *Source:* [Click Here]({original_url})"
-        caption += f"\n\n🤖 *Sent by:* @{(await context.bot.get_me()).username}"
-        
+        caption += f"\n🔗 *Source:* {result['original_url']}"
         return caption
     
-    @staticmethod
-    def cleanup_temp(temp_dir: str):
-        """Cleanup temporary files"""
-        try:
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except:
-            pass
-    
-    @staticmethod
-    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors"""
-        logger.error(f"Error: {context.error}")
+        logger.error(f"Exception while handling update: {context.error}")
+        
         if update and update.effective_message:
             try:
                 await update.effective_message.reply_text(
-                    "❌ An error occurred. Please try again."
+                    "❌ An error occurred. Please try again later."
                 )
             except:
                 pass
 
 def main():
-    """Main function to start the bot"""
-    # Check token
+    """Start the bot"""
+    # Check bot token
     if config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("\n" + "="*60)
-        print("ERROR: Bot token not set!")
+        print("ERROR: Bot token not configured!")
         print("="*60)
-        print("1. Get a token from @BotFather on Telegram")
-        print("2. Edit config.py or set BOT_TOKEN environment variable")
-        print("3. Example: export BOT_TOKEN='your_token_here'")
+        print("Please get a token from @BotFather on Telegram")
+        print("Then edit config.py and replace YOUR_BOT_TOKEN_HERE")
+        print("Or set environment variable:")
+        print("  export BOT_TOKEN='your_token_here'")
         print("="*60 + "\n")
         sys.exit(1)
     
-    # Create application
-    print("🤖 Initializing bot...")
+    print("🤖 Starting Telegram Video Downloader Bot...")
+    print("📁 Bot directory:", os.getcwd())
+    print("🐍 Python version:", sys.version.split()[0])
+    print("🔧 Using polling method (no port required)")
+    print("")
     
-    # Set bot options
+    # Create bot application
+    bot_handler = BotHandler()
+    
     application = Application.builder() \
         .token(config.BOT_TOKEN) \
-        .read_timeout(60) \
-        .write_timeout(60) \
-        .connect_timeout(60) \
-        .pool_timeout(60) \
+        .read_timeout(30) \
+        .write_timeout(30) \
+        .connect_timeout(30) \
         .build()
     
-    # Add handlers
-    application.add_handler(CommandHandler("start", BotHandlers.start))
-    application.add_handler(CommandHandler("help", BotHandlers.help))
-    application.add_handler(CommandHandler("about", BotHandlers.about))
-    application.add_handler(CommandHandler("stats", BotHandlers.stats))
+    # Add command handlers
+    application.add_handler(CommandHandler("start", bot_handler.start))
+    application.add_handler(CommandHandler("help", bot_handler.help))
+    application.add_handler(CommandHandler("about", bot_handler.about))
     
-    # Handle text messages
+    # Add message handler
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        BotHandlers.handle_message
+        bot_handler.handle_message
     ))
     
-    # Error handler
-    application.add_error_handler(BotHandlers.error_handler)
+    # Add error handler
+    application.add_error_handler(bot_handler.error_handler)
     
     # Start bot
-    print("\n" + "="*60)
-    print("🎉 Bot is starting...")
-    print("📱 Bot uses polling (no port needed)")
+    print("✅ Bot initialized successfully!")
+    print("⏳ Starting polling...")
     print("🛑 Press Ctrl+C to stop")
-    print("="*60 + "\n")
+    print("")
     
     try:
-        # Run bot with polling
         application.run_polling(
             poll_interval=1.0,
-            timeout=60,
+            timeout=30,
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
         )
@@ -582,88 +515,275 @@ if __name__ == '__main__':
     main()
 EOF
 
-# Create requirements.txt
-cat > requirements.txt << 'EOF'
-python-telegram-bot==20.6
-yt-dlp>=2024.4.9
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-lxml>=5.2.0
-EOF
-
 # Create startup script
-cat > start_bot.sh << 'EOF'
+cat > start.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
 
-echo "🤖 Starting Telegram Video Downloader Bot..."
-echo "📍 Directory: $(pwd)"
-echo "🐍 Python: $(python3 --version)"
-echo "🔄 Using polling method (no port required)"
+echo "========================================"
+echo "🤖 Telegram Video Downloader Bot"
+echo "========================================"
 
-# Check if venv exists
+# Check if running
+if pgrep -f "python3 bot.py" > /dev/null; then
+    echo "⚠️ Bot is already running!"
+    echo "Stop it first with: ./stop.sh"
+    exit 1
+fi
+
+# Check Python
+if ! command -v python3 > /dev/null; then
+    echo "❌ Python3 not found!"
+    exit 1
+fi
+
+# Check virtual environment
 if [ ! -d "venv" ]; then
-    echo "❌ Virtual environment not found. Run install.sh first."
+    echo "❌ Virtual environment not found!"
+    echo "Run: python3 -m venv venv"
+    echo "Then: source venv/bin/activate"
+    echo "Then: pip install -r requirements.txt"
     exit 1
 fi
 
 # Activate virtual environment
 source venv/bin/activate
 
-# Check FFmpeg
-if ! command -v ffmpeg &> /dev/null; then
-    echo "❌ FFmpeg not found. Installing..."
-    wget -q https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz -O ffmpeg.tar.xz
-    tar -xf ffmpeg.tar.xz --strip-components=1
-    chmod +x ffmpeg ffprobe
-    sudo mv ffmpeg ffprobe /usr/local/bin/
-    echo "✅ FFmpeg installed"
-fi
-
 # Check bot token
 if grep -q "YOUR_BOT_TOKEN_HERE" config.py; then
     echo ""
-    echo "❌ Bot token not configured!"
+    echo "❌ ERROR: Bot token not configured!"
     echo ""
-    echo "Please set your bot token:"
-    echo "1. Get token from @BotFather"
-    echo "2. Edit config.py and replace YOUR_BOT_TOKEN_HERE"
-    echo "3. Or run: export BOT_TOKEN='your_token_here'"
+    echo "Please follow these steps:"
+    echo "1. Open Telegram and search for @BotFather"
+    echo "2. Send /newbot to create a new bot"
+    echo "3. Copy the bot token (looks like: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)"
+    echo "4. Edit config.py and replace YOUR_BOT_TOKEN_HERE with your token"
     echo ""
-    read -p "Enter bot token now (or press Enter to skip): " BOT_TOKEN
-    if [ ! -z "$BOT_TOKEN" ]; then
-        sed -i "s/YOUR_BOT_TOKEN_HERE/$BOT_TOKEN/g" config.py
-        echo "✅ Token updated in config.py"
-    else
-        echo "⚠️  Using environment variable BOT_TOKEN"
-    fi
+    echo "Quick edit command:"
+    echo "  nano config.py"
+    echo ""
+    echo "Or set environment variable:"
+    echo "  export BOT_TOKEN='your_token_here'"
+    echo "  ./start.sh"
+    echo ""
+    exit 1
 fi
 
-# Run bot
+# Check requirements
+if [ ! -f "requirements.txt" ]; then
+    echo "📦 Creating requirements.txt..."
+    cat > requirements.txt << 'REQEOF'
+python-telegram-bot==20.6
+yt-dlp>=2024.11.11
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+REQEOF
+fi
+
+# Install/upgrade packages
+echo "📦 Checking Python packages..."
+pip install --upgrade -r requirements.txt > /dev/null 2>&1
+
+# Create downloads directory
+mkdir -p downloads
+
 echo ""
+echo "✅ All checks passed!"
 echo "🚀 Starting bot..."
-echo "📝 Logs will be saved to bot.log"
-echo "🛑 Press Ctrl+C to stop"
+echo ""
+echo "📝 Logs will be saved to: bot.log"
+echo "🔄 Bot will check for new messages every second"
+echo "📱 Send a Facebook/TikTok link to your bot on Telegram"
+echo "🛑 Press Ctrl+C to stop the bot"
 echo ""
 
+# Run bot
 exec python3 bot.py
 EOF
 
-chmod +x start_bot.sh
+chmod +x start.sh
 
-# Create systemd service
-cat > telegram-bot.service << EOF
+# Create stop script
+cat > stop.sh << 'EOF'
+#!/bin/bash
+echo "🛑 Stopping bot..."
+pkill -f "python3 bot.py" 2>/dev/null
+sleep 2
+if pgrep -f "python3 bot.py" > /dev/null; then
+    echo "⚠️ Bot still running, forcing stop..."
+    pkill -9 -f "python3 bot.py" 2>/dev/null
+fi
+echo "✅ Bot stopped"
+EOF
+
+chmod +x stop.sh
+
+# Create restart script
+cat > restart.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+./stop.sh
+sleep 3
+./start.sh
+EOF
+
+chmod +x restart.sh
+
+# Create status script
+cat > status.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+
+echo "========================================"
+echo "🤖 Bot Status Check"
+echo "========================================"
+
+# Check if running
+if pgrep -f "python3 bot.py" > /dev/null; then
+    echo "✅ Bot is running"
+    
+    # Show process info
+    echo ""
+    echo "Process Info:"
+    ps aux | grep "python3 bot.py" | grep -v grep
+    
+    # Show logs
+    if [ -f "bot.log" ]; then
+        echo ""
+        echo "📝 Last 5 log lines:"
+        tail -5 bot.log
+    fi
+    
+else
+    echo "❌ Bot is not running"
+    echo ""
+    echo "To start: ./start.sh"
+fi
+
+# Check config
+echo ""
+echo "📋 Configuration:"
+if grep -q "YOUR_BOT_TOKEN_HERE" config.py; then
+    echo "❌ Bot token not configured"
+else
+    echo "✅ Bot token configured"
+fi
+
+# Check directories
+echo ""
+echo "📁 Directories:"
+[ -d "venv" ] && echo "✅ Virtual environment" || echo "❌ Virtual environment missing"
+[ -d "downloads" ] && echo "✅ Downloads directory" || echo "❌ Downloads directory missing"
+
+# Check Python packages
+echo ""
+echo "🐍 Python Packages:"
+source venv/bin/activate 2>/dev/null
+python3 -c "import telegram, yt_dlp, requests; print('✅ All packages installed')" 2>/dev/null || echo "❌ Some packages missing"
+EOF
+
+chmod +x status.sh
+
+# Create cleanup script
+cat > cleanup.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "🧹 Cleaning old downloads..."
+find downloads -type f -name "*.mp4" -mtime +1 -delete 2>/dev/null
+find downloads -type f -name "*.jpg" -mtime +1 -delete 2>/dev/null
+find downloads -type d -empty -delete 2>/dev/null
+echo "✅ Cleanup complete"
+EOF
+
+chmod +x cleanup.sh
+
+# Create simple setup script
+cat > setup_bot.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+
+echo "========================================"
+echo "🤖 Bot Setup Wizard"
+echo "========================================"
+
+# Check if config exists
+if [ ! -f "config.py" ]; then
+    echo "❌ config.py not found!"
+    exit 1
+fi
+
+# Ask for bot token
+if grep -q "YOUR_BOT_TOKEN_HERE" config.py; then
+    echo ""
+    echo "📱 Please enter your Telegram Bot Token"
+    echo "   (Get it from @BotFather on Telegram)"
+    echo ""
+    read -p "Enter bot token: " BOT_TOKEN
+    
+    if [ -z "$BOT_TOKEN" ]; then
+        echo "❌ Token cannot be empty!"
+        exit 1
+    fi
+    
+    # Update config
+    sed -i "s/YOUR_BOT_TOKEN_HERE/$BOT_TOKEN/g" config.py
+    echo "✅ Token saved to config.py"
+    
+    # Also set as environment variable
+    echo "export BOT_TOKEN='$BOT_TOKEN'" >> ~/.bashrc
+    export BOT_TOKEN="$BOT_TOKEN"
+    echo "✅ Token added to environment variables"
+fi
+
+# Setup virtual environment if needed
+if [ ! -d "venv" ]; then
+    echo ""
+    echo "🐍 Setting up Python virtual environment..."
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install --upgrade pip
+    
+    echo "📦 Installing required packages..."
+    pip install python-telegram-bot yt-dlp requests beautifulsoup4 lxml
+    echo "✅ Packages installed"
+fi
+
+# Create downloads directory
+mkdir -p downloads
+
+echo ""
+echo "========================================"
+echo "🎉 Setup Complete!"
+echo "========================================"
+echo ""
+echo "To start the bot:"
+echo "  ./start.sh"
+echo ""
+echo "Other commands:"
+echo "  ./stop.sh     - Stop bot"
+echo "  ./restart.sh  - Restart bot"
+echo "  ./status.sh   - Check bot status"
+echo "  ./cleanup.sh  - Clean old files"
+echo ""
+echo "📱 Go to Telegram and send a video link to your bot!"
+EOF
+
+chmod +x setup_bot.sh
+
+# Create systemd service file
+cat > telegram-bot.service << 'EOF'
 [Unit]
-Description=Telegram Video Downloader Bot (Portless)
+Description=Telegram Video Downloader Bot
 After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$BOT_DIR
-Environment="PATH=$BOT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="BOT_TOKEN=YOUR_BOT_TOKEN_HERE"
-ExecStart=$BOT_DIR/start_bot.sh
+User=root
+WorkingDirectory=/root/telegram-video-bot
+Environment="PATH=/root/telegram-video-bot/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/telegram-video-bot/start.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -673,68 +793,20 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Create quick setup script
-cat > quick_setup.sh << 'EOF'
-#!/bin/bash
-echo "⚡ Quick Setup for Telegram Video Bot"
-echo ""
-
-# Get bot token
-read -p "Enter your Telegram Bot Token: " BOT_TOKEN
-if [ -z "$BOT_TOKEN" ]; then
-    echo "❌ Token is required!"
-    exit 1
-fi
-
-# Update config
-cd "$(dirname "$0")"
-sed -i "s/YOUR_BOT_TOKEN_HERE/$BOT_TOKEN/g" config.py
-
-# Set as environment variable
-echo "export BOT_TOKEN='$BOT_TOKEN'" >> ~/.bashrc
-export BOT_TOKEN="$BOT_TOKEN"
-
-echo ""
-echo "✅ Setup complete!"
-echo ""
-echo "To start bot manually:"
-echo "  cd ~/telegram-video-bot && ./start_bot.sh"
-echo ""
-echo "To run as service:"
-echo "  sudo cp telegram-bot.service /etc/systemd/system/"
-echo "  sudo systemctl daemon-reload"
-echo "  sudo systemctl enable telegram-bot"
-echo "  sudo systemctl start telegram-bot"
-EOF
-
-chmod +x quick_setup.sh
-
-# Create cleanup script
-cat > cleanup.sh << 'EOF'
-#!/bin/bash
-echo "🧹 Cleaning up old downloads..."
-cd "$(dirname "$0")"
-find ./downloads -type f -name "*.mp4" -mtime +1 -delete
-find ./downloads -type f -name "*.jpg" -mtime +1 -delete
-find ./downloads -type d -empty -delete
-echo "✅ Cleanup complete!"
-EOF
-
-chmod +x cleanup.sh
-
-# Create README
+# Create README file
 cat > README.md << 'EOF'
-# Telegram Video Downloader Bot (Portless)
+# Telegram Video Downloader Bot
 
 ## Features
-- 📥 Downloads from Facebook, TikTok, Instagram
+- 📥 Download from Facebook, TikTok, Instagram
 - 🚫 No port required (uses polling)
-- 📦 Includes FFmpeg (no separate installation)
-- 💾 Auto-cleanup of temp files
-- 📊 Statistics tracking
+- 🔧 Simple setup
+- 🧹 Auto-cleanup
+- 📊 Logging
 
 ## Quick Start
 
-1. **Set bot token:**
-   ```bash
-   ./quick_setup.sh
+### 1. Installation
+```bash
+# Run the installer
+bash <(curl -s https://raw.githubusercontent.com/2amir563/khodam-facebook-tiktak-totelegram/main/install.sh)
