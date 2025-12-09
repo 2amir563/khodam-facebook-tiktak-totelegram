@@ -23,7 +23,6 @@ sudo chmod a+x /usr/local/bin/yt-dlp
 echo "🐍 Creating virtual environment and installing required Python libraries..."
 python3 -m venv venv
 source venv/bin/activate
-# Install only necessary libraries
 pip install python-telegram-bot python-dotenv uuid
 
 # 4. Configure Bot Token
@@ -101,8 +100,20 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Define temporary output path using a unique ID
     unique_id = uuid.uuid4().hex
     temp_dir = f"./downloads/{chat_id}"
-    os.makedirs(temp_dir, exist_ok=True)
     
+    # Ensure the downloads directory exists and has permissions
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+    except Exception as e:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            text=f"❌ **Directory Error:** Cannot create temporary directory. Check permissions.\nError: `{type(e).__name__}`",
+            parse_mode='Markdown'
+        )
+        logger.error(f"Directory creation failed: {e}")
+        return
+        
     # yt-dlp output template path (in the temporary directory)
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
     absolute_output_template = os.path.abspath(output_template)
@@ -112,21 +123,20 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         # --- 1. Execute yt-dlp for download ---
         
-        # New flag: --no-progress to remove status lines from stdout
         command = [
             "yt-dlp",
             "-f", "best",
             "--max-filesize", "50M", 
             "--restrict-filenames",
             "--no-warnings",
-            "--no-progress", # Crucial: prevents status updates from polluting stdout
+            "--no-progress",
             "--print", "filepath", 
             link,
             "-o", absolute_output_template
         ]
         
         # Execute command
-        process = subprocess.run(command, check=True, capture_output=True, text=True)
+        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=300) # Added timeout 5 min
         
         # Clean the stdout and get the last line (which should be the path)
         yt_dlp_output_lines = [line.strip() for line in process.stdout.strip().split('\n') if line.strip()]
@@ -134,9 +144,12 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Crucial check: if yt-dlp executed successfully but didn't produce a file path.
         if not downloaded_filepath or not os.path.exists(downloaded_filepath):
-             logger.error(f"yt-dlp failed to produce file path or file not found at: {downloaded_filepath}. STDOUT: {process.stdout.strip()}")
-             # If the file is truly not found, we re-raise the error to catch it in the except block
-             raise FileNotFoundError(f"Download completed, but file not found at path: {downloaded_filepath}")
+             # Log the full output for server-side debugging
+             logger.error(f"FILE NOT FOUND. Link: {link}. YT-DLP STDOUT: {process.stdout.strip()}. YT-DLP STDERR: {process.stderr.strip()}")
+             
+             # Raise an error that includes the yt-dlp output for the user
+             error_details = process.stderr.strip().split('\n')[-1] if process.stderr.strip() else "No specific error reported by yt-dlp."
+             raise FileNotFoundError(f"Download completed, but file not found. YT-DLP output details: {error_details}")
         
         # --- 2. Send File ---
         
@@ -148,7 +161,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Determine file type for correct sending (video or photo)
         try:
-            # Use the 'file' command which is more reliable than mimetypes for downloads
             mime_type_process = subprocess.run(['file', '-b', '--mime-type', downloaded_filepath], capture_output=True, text=True, check=True)
             mime_type = mime_type_process.stdout.strip()
         except subprocess.CalledProcessError:
@@ -178,15 +190,14 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
 
     except FileNotFoundError as e:
-        # Handles the raised custom error and official FileNotFoundError
-        error_message = f"❌ File Not Found Error: The downloaded file could not be located on the server. Please ensure the link is valid and public."
+        # Handles the raised custom error: includes YT-DLP details for debugging
+        error_message = str(e).replace('yt-dlp.','') # Clean up the error message slightly
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message.message_id,
-            text=error_message,
+            text=f"❌ File Not Found Error: The downloaded file could not be located on the server.\nDetails: `{error_message}`",
             parse_mode='Markdown'
         )
-        logger.error(f"FileNotFoundError: {e}")
 
     except subprocess.CalledProcessError as e:
         # Handle yt-dlp errors (e.g., video unavailable, private video)
@@ -210,7 +221,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     finally:
         # --- 3. Cleanup downloaded files ---
-        # Ensure cleanup runs on the known final path
         if downloaded_filepath and os.path.exists(downloaded_filepath):
             os.remove(downloaded_filepath)
 
