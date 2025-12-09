@@ -1,974 +1,740 @@
+#!/bin/bash
+
+# Telegram Facebook & TikTok Downloader Bot Installer - Portless Version
+# Created by: khodam-facebook-tiktak-totelegram
+# GitHub: https://github.com/2amir563/khodam-facebook-tiktak-totelegram
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Functions
+print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Check root
+if [ "$EUID" -eq 0 ]; then 
+    print_warning "Running as root is not recommended."
+fi
+
+print_info "Starting installation of Portless Telegram Video Downloader Bot..."
+
+# Update system
+print_info "Updating system packages..."
+sudo apt-get update
+sudo apt-get upgrade -y
+
+# Install dependencies
+print_info "Installing dependencies..."
+sudo apt-get install -y python3 python3-pip python3-venv git curl wget unzip
+
+# Download and install static FFmpeg
+print_info "Installing static FFmpeg..."
+FFMPEG_DIR="$HOME/ffmpeg-static"
+mkdir -p "$FFMPEG_DIR"
+cd "$FFMPEG_DIR"
+
+# Download latest static FFmpeg
+FFMPEG_URL=$(curl -s https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest | grep -o 'https://.*linux64.*.tar.xz' | head -1)
+if [ -z "$FFMPEG_URL" ]; then
+    FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz"
+fi
+
+wget -q "$FFMPEG_URL" -O ffmpeg.tar.xz
+tar -xf ffmpeg.tar.xz --strip-components=1
+chmod +x ffmpeg ffprobe
+sudo cp ffmpeg ffprobe /usr/local/bin/
+print_success "FFmpeg installed successfully"
+
+# Create bot directory
+BOT_DIR="$HOME/telegram-video-bot"
+print_info "Creating bot directory at $BOT_DIR..."
+mkdir -p "$BOT_DIR"
+cd "$BOT_DIR"
+
+# Create virtual environment
+print_info "Setting up Python virtual environment..."
+python3 -m venv venv
+source venv/bin/activate
+
+# Install Python packages
+print_info "Installing Python packages..."
+pip install --upgrade pip
+pip install python-telegram-bot==20.6
+pip install yt-dlp
+pip install requests
+pip install beautifulsoup4
+pip install lxml
+
+# Create config.py
+print_info "Creating configuration files..."
+cat > config.py << 'EOF'
+#!/usr/bin/env python3
+import os
+
+# Bot Configuration
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x]
+
+# FFmpeg path
+FFMPEG_PATH = "/usr/local/bin/ffmpeg"
+FFPROBE_PATH = "/usr/local/bin/ffprobe"
+
+# Download settings
+MAX_FILE_SIZE = 2000 * 1024 * 1024  # 2GB
+DOWNLOAD_PATH = "./downloads"
+SUPPORTED_PLATFORMS = ["facebook.com", "fb.watch", "tiktok.com", "instagram.com"]
+
+# Bot messages
+MESSAGES = {
+    "start": """
+🤖 **Video Downloader Bot**
+
+Send me a link from:
+• Facebook (videos, reels)
+• TikTok (videos)
+• Instagram (reels, posts)
+
+I'll download and send it to you!
+
+Commands:
+/start - Start bot
+/help - Show help
+/about - About bot
+/stats - Bot statistics
+""",
+    
+    "help": """
+📖 **How to use:**
+
+1. Send a Facebook/TikTok/Instagram link
+2. Wait for download
+3. Receive video in Telegram
+
+⚠️ **Notes:**
+- Only public videos
+- Max 2GB per file
+- Files deleted after sending
+""",
+    
+    "about": """
+📱 **Video Downloader Bot**
+
+GitHub: https://github.com/2amir563/khodam-facebook-tiktak-totelegram
+
+**Technologies:**
+• Python Telegram Bot
+• yt-dlp
+• FFmpeg (static)
+
+⚠️ For personal use only
+"""
+}
+EOF
+
+# Create main bot file
+print_info "Creating main bot file..."
+cat > bot.py << 'EOF'
 #!/usr/bin/env python3
 """
-Telegram Facebook & TikTok Downloader Bot
-Download Facebook and TikTok videos with captions
+Telegram Video Downloader Bot - Portless Version
+Uses polling method without opening ports
 """
 
 import os
-import json
+import re
+import sys
+import time
 import logging
 import asyncio
-import threading
-import time
-import re
-from datetime import datetime, timedelta
+import tempfile
+from datetime import datetime
+from urllib.parse import urlparse
 from pathlib import Path
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+
+from telegram import Update, InputFile
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
+
 import yt_dlp
-import requests
+from yt_dlp.utils import DownloadError
+
+import config
 
 # Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.FileHandler('bot.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-class FacebookTikTokBot:
-    def __init__(self):
-        self.config = self.load_config()
-        self.token = self.config['telegram']['token']
-        self.admin_ids = self.config['telegram'].get('admin_ids', [])
-        
-        # Bot state
-        self.is_paused = False
-        self.paused_until = None
-        
-        # Create directories
-        self.download_dir = Path(self.config.get('download_dir', 'downloads'))
-        self.download_dir.mkdir(exist_ok=True)
-        
-        # Start auto cleanup
-        self.start_auto_cleanup()
-        
-        logger.info("🤖 Facebook & TikTok Bot initialized")
-        print(f"✅ Token: {self.token[:15]}...")
+# Statistics
+bot_stats = {
+    "start_time": datetime.now(),
+    "downloads": 0,
+    "errors": 0,
+    "users": set()
+}
+
+# Ensure download directory exists
+os.makedirs(config.DOWNLOAD_PATH, exist_ok=True)
+
+class VideoDownloader:
+    """Handles video downloading and processing"""
     
-    def load_config(self):
-        """Load configuration"""
-        config_file = 'config.json'
-        if os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        
-        # Default config
-        config = {
-            'telegram': {
-                'token': 'YOUR_BOT_TOKEN_HERE',
-                'admin_ids': [],
-                'max_file_size': 2000
-            },
-            'download_dir': 'downloads',
-            'auto_cleanup_minutes': 2,
-            'facebook_cookie': '',
-            'tiktok_session': ''
+    @staticmethod
+    def is_supported_url(url: str) -> bool:
+        """Check if URL is supported"""
+        url_lower = url.lower()
+        for platform in config.SUPPORTED_PLATFORMS:
+            if platform in url_lower:
+                return True
+        return False
+    
+    @staticmethod
+    def extract_video_info(url: str):
+        """Extract video information"""
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'ffmpeg_location': config.FFMPEG_PATH,
         }
         
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-        
-        return config
-    
-    def start_auto_cleanup(self):
-        """Start auto cleanup thread"""
-        def cleanup_worker():
-            while True:
-                try:
-                    self.cleanup_old_files()
-                    time.sleep(60)
-                except Exception as e:
-                    logger.error(f"Cleanup error: {e}")
-                    time.sleep(60)
-        
-        thread = threading.Thread(target=cleanup_worker, daemon=True)
-        thread.start()
-        logger.info("🧹 Auto cleanup started")
-    
-    def cleanup_old_files(self):
-        """Cleanup files older than 2 minutes"""
-        cutoff_time = time.time() - (2 * 60)
-        files_deleted = 0
-        
-        for file_path in self.download_dir.glob('*'):
-            if file_path.is_file():
-                file_age = time.time() - file_path.stat().st_mtime
-                if file_age > (2 * 60):
-                    try:
-                        file_path.unlink()
-                        files_deleted += 1
-                    except Exception as e:
-                        logger.error(f"Error deleting {file_path}: {e}")
-        
-        if files_deleted > 0:
-            logger.info(f"Cleaned {files_deleted} old files")
-    
-    def detect_platform(self, url):
-        """Detect platform from URL"""
-        url_lower = url.lower()
-        
-        if 'facebook.com' in url_lower or 'fb.com' in url_lower or 'fb.watch' in url_lower:
-            return 'facebook'
-        elif 'tiktok.com' in url_lower:
-            return 'tiktok'
-        elif 'instagram.com' in url_lower:
-            return 'instagram'
-        else:
-            return 'unknown'
-    
-    def format_size(self, bytes_size):
-        """Format bytes to human readable size"""
-        if bytes_size == 0:
-            return "N/A"
-        
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if bytes_size < 1024.0:
-                return f"{bytes_size:.1f} {unit}"
-            bytes_size /= 1024.0
-        return f"{bytes_size:.1f} TB"
-    
-    def get_facebook_cookie_header(self):
-        """Get Facebook cookie header if available"""
-        cookie = self.config.get('facebook_cookie', '')
-        if cookie:
-            return {'Cookie': cookie}
-        return {}
-    
-    def get_tiktok_session_header(self):
-        """Get TikTok session header if available"""
-        session = self.config.get('tiktok_session', '')
-        if session:
-            return {'Cookie': f'sessionid={session}'}
-        return {}
-    
-    async def get_video_info(self, url, platform):
-        """Get video information"""
         try:
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'skip_download': True,
-            }
-            
-            # Add platform-specific headers
-            if platform == 'facebook':
-                headers = self.get_facebook_cookie_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            elif platform == 'tiktok':
-                headers = self.get_tiktok_session_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                return info
-                
+                return {
+                    'title': info.get('title', 'Video'),
+                    'duration': info.get('duration', 0),
+                    'uploader': info.get('uploader', 'Unknown'),
+                    'thumbnail': info.get('thumbnail'),
+                    'description': info.get('description', ''),
+                    'url': url
+                }
         except Exception as e:
-            logger.error(f"Error getting video info: {e}")
+            logger.error(f"Info extraction failed: {e}")
             return None
     
-    def extract_caption(self, info, platform):
-        """Extract caption from video info"""
+    @staticmethod
+    def download_video(url: str, user_id: int):
+        """Download video and return file path"""
+        temp_dir = tempfile.mkdtemp(dir=config.DOWNLOAD_PATH)
+        output_template = os.path.join(temp_dir, '%(title).100s.%(ext)s')
+        
+        ydl_opts = {
+            'format': 'best[filesize<50M]',
+            'outtmpl': output_template,
+            'quiet': False,
+            'no_warnings': False,
+            'ffmpeg_location': config.FFMPEG_PATH,
+            'postprocessors': [
+                {
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                },
+                {
+                    'key': 'FFmpegThumbnailsConvertor',
+                    'format': 'jpg',
+                },
+            ],
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            'progress_hooks': [VideoDownloader.progress_hook],
+            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        }
+        
         try:
-            caption = ""
-            
-            if platform == 'facebook':
-                # Facebook caption
-                if 'description' in info and info['description']:
-                    caption = info['description']
-                elif 'title' in info and info['title']:
-                    caption = info['title']
-                elif 'uploader' in info and info['uploader']:
-                    caption = f"Posted by: {info['uploader']}"
-            
-            elif platform == 'tiktok':
-                # TikTok caption
-                if 'description' in info and info['description']:
-                    caption = info['description']
-                elif 'title' in info and info['title']:
-                    caption = info['title']
-                elif 'uploader' in info and info['uploader']:
-                    caption = f"Creator: @{info['uploader']}"
-            
-            elif platform == 'instagram':
-                # Instagram caption
-                if 'description' in info and info['description']:
-                    caption = info['description']
-                elif 'title' in info and info['title']:
-                    caption = info['title']
-                elif 'uploader' in info and info['uploader']:
-                    caption = f"Posted by: @{info['uploader']}"
-            
-            # Clean up the caption
-            if caption:
-                # Remove URLs
-                caption = re.sub(r'http\S+', '', caption)
-                # Remove extra whitespace
-                caption = ' '.join(caption.split())
-                # Truncate if too long
-                if len(caption) > 1000:
-                    caption = caption[:1000] + "..."
-            
-            return caption
-            
-        except Exception as e:
-            logger.error(f"Error extracting caption: {e}")
-            return ""
-    
-    def create_quality_keyboard(self, formats, platform):
-        """Create keyboard for quality selection"""
-        keyboard = []
-        
-        if formats:
-            for fmt in formats:
-                quality_label = fmt['quality']
-                if len(quality_label) > 50:
-                    quality_label = quality_label[:47] + "..."
-                
-                keyboard.append([
-                    InlineKeyboardButton(
-                        f"🎬 {quality_label}",
-                        callback_data=f"download_{fmt['format_id']}"
-                    )
-                ])
-        else:
-            # Default options if no formats
-            keyboard.append([
-                InlineKeyboardButton("📹 Best Quality", callback_data="download_best")
-            ])
-            keyboard.append([
-                InlineKeyboardButton("📹 720p HD", callback_data="download_720")
-            ])
-            keyboard.append([
-                InlineKeyboardButton("📹 480p SD", callback_data="download_480")
-            ])
-        
-        # Add audio option for platforms that support it
-        if platform in ['facebook', 'tiktok']:
-            keyboard.append([
-                InlineKeyboardButton(
-                    "🎵 Audio Only",
-                    callback_data="download_audio"
-                )
-            ])
-        
-        # Add cancel button
-        keyboard.append([
-            InlineKeyboardButton("❌ Cancel", callback_data="cancel")
-        ])
-        
-        return InlineKeyboardMarkup(keyboard)
-    
-    async def get_video_formats(self, url, platform):
-        """Get available formats with sizes"""
-        try:
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'skip_download': True,
-            }
-            
-            # Add platform-specific headers
-            if platform == 'facebook':
-                headers = self.get_facebook_cookie_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            elif platform == 'tiktok':
-                headers = self.get_tiktok_session_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(url, download=True)
+                downloaded_file = ydl.prepare_filename(info)
                 
-                formats = []
-                if 'formats' in info:
-                    for fmt in info['formats']:
-                        if not fmt.get('filesize'):
-                            continue
-                        
-                        # Skip audio-only for video selection
-                        if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
-                            continue
-                        
-                        resolution = fmt.get('resolution', 'N/A')
-                        if resolution == 'audio only':
-                            continue
-                        
-                        format_note = fmt.get('format_note', '')
-                        if not format_note and resolution != 'N/A':
-                            format_note = resolution
-                        
-                        # Calculate size
-                        size_mb = fmt['filesize'] / (1024 * 1024)
-                        max_size = self.config['telegram']['max_file_size']
-                        
-                        if size_mb > max_size:
-                            continue
-                        
-                        formats.append({
-                            'format_id': fmt['format_id'],
-                            'resolution': resolution,
-                            'format_note': format_note,
-                            'ext': fmt.get('ext', 'mp4'),
-                            'filesize_mb': round(size_mb, 1),
-                            'quality': f"{format_note} ({resolution}) - {size_mb:.1f}MB"
-                        })
+                # Convert to MP4 if needed
+                if not downloaded_file.endswith('.mp4'):
+                    mp4_file = os.path.splitext(downloaded_file)[0] + '.mp4'
+                    if os.path.exists(mp4_file):
+                        downloaded_file = mp4_file
                 
-                # Sort by quality (highest first)
-                formats.sort(key=lambda x: (
-                    -int(x['resolution'].split('x')[0]) if 'x' in x['resolution'] else 0,
-                    -x['filesize_mb']
-                ))
-                
-                return formats[:5]  # Return top 5 formats
-                
-        except Exception as e:
-            logger.error(f"Error getting formats: {e}")
-            return []
-    
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
-        user = update.effective_user
-        
-        if self.is_paused and self.paused_until and datetime.now() < self.paused_until:
-            remaining = self.paused_until - datetime.now()
-            hours = remaining.seconds // 3600
-            minutes = (remaining.seconds % 3600) // 60
-            await update.message.reply_text(
-                f"⏸️ Bot is paused\nWill resume in: {hours}h {minutes}m"
-            )
-            return
-        
-        welcome = f"""
-Hello {user.first_name}! 👋
-
-🤖 **Facebook & TikTok Downloader Bot**
-
-📥 **Supported Platforms:**
-✅ Facebook (videos with captions)
-✅ TikTok (videos with captions)
-✅ Instagram (videos with captions)
-
-🎯 **How it works:**
-1. Send Facebook/TikTok/Instagram link
-2. Bot downloads the video
-3. Video sent to Telegram with caption
-4. Temporary files auto deleted
-
-⚡ **Features:**
-• Downloads videos with original captions
-• Quality selection available
-• Shows file size before download
-• Auto cleanup every 2 minutes
-• Audio extraction option
-• Pause/Resume functionality
-
-🛠️ **Commands:**
-/start - Show this menu
-/help - Detailed help
-/status - Bot status (admin)
-/pause [hours] - Pause bot (admin)
-/resume - Resume bot (admin)
-/clean - Clean files (admin)
-/settings - Configure cookies (admin)
-
-💡 **Files auto deleted after 2 minutes**
-
-🔧 **For better downloads:**
-Add Facebook cookie or TikTok session in settings
-"""
-        
-        await update.message.reply_text(welcome, parse_mode='Markdown')
-        logger.info(f"User {user.id} started bot")
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /help command"""
-        help_text = """
-📖 **Facebook & TikTok Bot Help Guide**
-
-🎯 **How to use:**
-1. Send Facebook, TikTok, or Instagram link
-2. Bot analyzes the video
-3. Select quality if available
-4. Bot downloads and sends video with caption
-
-🔗 **Supported link formats:**
-• Facebook: https://www.facebook.com/.../videos/...
-• Facebook: https://fb.watch/...
-• TikTok: https://www.tiktok.com/@.../video/...
-• Instagram: https://www.instagram.com/p/...
-
-📊 **Limits:**
-• Max file size: 2GB (Telegram limit)
-• Temporary files deleted after 2 minutes
-• Some private videos may require cookies
-
-⚡ **Tips:**
-• For private Facebook videos, add cookie in settings
-• For TikTok, add sessionid in settings
-• Use quality selection for smaller file sizes
-• Audio option available for audio-only downloads
-
-🛠️ **Admin commands:**
-/status - Bot and server status
-/settings - Configure cookies and sessions
-/clean - Clean temporary files
-"""
-        
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-    
-    async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /settings command"""
-        user = update.effective_user
-        if user.id not in self.admin_ids and len(self.admin_ids) > 0:
-            await update.message.reply_text("⛔ Admin only!")
-            return
-        
-        settings_text = """
-⚙️ **Bot Settings**
-
-For better video downloads, you can configure:
-
-**Facebook Cookie:**
-1. Login to Facebook in browser
-2. Open Developer Tools (F12)
-3. Go to Network tab
-4. Refresh page
-5. Find any request to facebook.com
-6. Copy the `Cookie` header value
-
-**TikTok Session ID:**
-1. Login to TikTok in browser
-2. Open Developer Tools (F12)
-3. Go to Application/Storage tab
-4. Find Cookies for tiktok.com
-5. Copy the `sessionid` value
-
-**Current Settings:"""
-        
-        facebook_cookie = self.config.get('facebook_cookie', 'Not set')
-        tiktok_session = self.config.get('tiktok_session', 'Not set')
-        
-        settings_text += f"\n\n📱 Facebook Cookie: {'✅ Set' if facebook_cookie and facebook_cookie != 'Not set' else '❌ Not set'}"
-        settings_text += f"\n🎵 TikTok Session: {'✅ Set' if tiktok_session and tiktok_session != 'Not set' else '❌ Not set'}"
-        
-        keyboard = [
-            [InlineKeyboardButton("📱 Set Facebook Cookie", callback_data="set_facebook_cookie")],
-            [InlineKeyboardButton("🎵 Set TikTok Session", callback_data="set_tiktok_session")],
-            [InlineKeyboardButton("❌ Clear Settings", callback_data="clear_settings")],
-            [InlineKeyboardButton("🔙 Back", callback_data="settings_back")]
-        ]
-        
-        await update.message.reply_text(
-            settings_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages"""
-        if self.is_paused and self.paused_until and datetime.now() < self.paused_until:
-            remaining = self.paused_until - datetime.now()
-            hours = remaining.seconds // 3600
-            minutes = (remaining.seconds % 3600) // 60
-            await update.message.reply_text(
-                f"⏸️ Bot is paused\nWill resume in: {hours}h {minutes}m"
-            )
-            return
-        
-        text = update.message.text.strip()
-        user = update.effective_user
-        
-        logger.info(f"Message from {user.first_name}: {text[:50]}")
-        
-        if text.startswith(('http://', 'https://')):
-            platform = self.detect_platform(text)
-            
-            if platform in ['facebook', 'tiktok', 'instagram']:
-                # Show quality selection
-                await update.message.reply_text(f"🔍 Analyzing {platform.capitalize()} video...")
-                formats = await self.get_video_formats(text, platform)
-                
-                if formats:
-                    # Get video info for caption preview
-                    info = await self.get_video_info(text, platform)
-                    caption_preview = ""
-                    
-                    if info:
-                        caption_preview = self.extract_caption(info, platform)
-                        if caption_preview:
-                            caption_preview = caption_preview[:100] + "..." if len(caption_preview) > 100 else caption_preview
-                    
-                    info_text = f"📹 **{platform.capitalize()} Video**\n\n"
-                    
-                    if caption_preview:
-                        info_text += f"📝 **Caption:** {caption_preview}\n\n"
-                    
-                    info_text += "🎬 **Available Qualities:**\n"
-                    
-                    for i, fmt in enumerate(formats[:3], 1):
-                        info_text += f"{i}. {fmt['quality']}\n"
-                    
-                    if len(formats) > 3:
-                        info_text += f"... and {len(formats) - 3} more\n"
-                    
-                    await update.message.reply_text(info_text, parse_mode='Markdown')
-                    
-                    keyboard = self.create_quality_keyboard(formats, platform)
-                    await update.message.reply_text(
-                        "👇 Select quality:",
-                        reply_markup=keyboard
-                    )
-                    
-                    # Save for callback
-                    context.user_data['last_url'] = text
-                    context.user_data['last_platform'] = platform
-                    if info:
-                        context.user_data['video_info'] = info
-                    
+                # Get thumbnail
+                thumbnail = None
+                if info.get('thumbnail'):
+                    thumbnail = info.get('thumbnail')
                 else:
-                    # Fallback if no formats
-                    await update.message.reply_text("📥 Downloading with best quality...")
-                    await self.download_video(update, text, platform, 'best')
-            
-            else:
-                await update.message.reply_text(
-                    "❌ Unsupported platform\n\n"
-                    "✅ **Supported platforms:**\n"
-                    "• Facebook (facebook.com, fb.com, fb.watch)\n"
-                    "• TikTok (tiktok.com)\n"
-                    "• Instagram (instagram.com)\n\n"
-                    "📝 Please send a valid Facebook, TikTok, or Instagram link"
-                )
-        
-        else:
-            await update.message.reply_text(
-                "Please send a valid URL starting with http:// or https://\n\n"
-                "🌟 **Supported:**\n"
-                "• Facebook videos with captions\n"
-                "• TikTok videos with captions\n"
-                "• Instagram videos with captions\n\n"
-                "🔗 **Example:**\n"
-                "https://www.facebook.com/.../videos/...\n"
-                "https://www.tiktok.com/@.../video/..."
-            )
-    
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle callback queries"""
-        query = update.callback_query
-        await query.answer()
-        
-        data = query.data
-        
-        if data == 'cancel':
-            await query.edit_message_text("❌ Download cancelled.")
-            return
-        
-        # Settings callbacks
-        elif data == 'set_facebook_cookie':
-            await query.edit_message_text(
-                "📱 **Setting Facebook Cookie**\n\n"
-                "Please send the Facebook cookie value:\n\n"
-                "1. Login to Facebook in browser\n"
-                "2. Open Developer Tools (F12)\n"
-                "3. Go to Network tab\n"
-                "4. Refresh page\n"
-                "5. Find any request to facebook.com\n"
-                "6. Copy the `Cookie` header value\n\n"
-                "Send the cookie value now:"
-            )
-            context.user_data['awaiting_facebook_cookie'] = True
-            return
-        
-        elif data == 'set_tiktok_session':
-            await query.edit_message_text(
-                "🎵 **Setting TikTok Session**\n\n"
-                "Please send the TikTok sessionid value:\n\n"
-                "1. Login to TikTok in browser\n"
-                "2. Open Developer Tools (F12)\n"
-                "3. Go to Application/Storage tab\n"
-                "4. Find Cookies for tiktok.com\n"
-                "5. Copy the `sessionid` value\n\n"
-                "Send the sessionid value now:"
-            )
-            context.user_data['awaiting_tiktok_session'] = True
-            return
-        
-        elif data == 'clear_settings':
-            self.config['facebook_cookie'] = ''
-            self.config['tiktok_session'] = ''
-            self.save_config()
-            await query.edit_message_text("✅ Settings cleared!")
-            return
-        
-        elif data == 'settings_back':
-            await query.delete_message()
-            await self.settings_command(update, context)
-            return
-        
-        # Download callbacks
-        elif data.startswith('download_'):
-            format_spec = data.replace('download_', '')
-            
-            url = context.user_data.get('last_url')
-            platform = context.user_data.get('last_platform')
-            
-            if not url or not platform:
-                await query.edit_message_text("❌ URL not found!")
-                return
-            
-            # Map quality names to yt-dlp format specs
-            format_map = {
-                'best': 'best',
-                '720': 'best[height<=720]',
-                '480': 'best[height<=480]',
-                'audio': 'bestaudio'
-            }
-            
-            actual_format = format_map.get(format_spec, format_spec)
-            
-            await query.edit_message_text(f"⏳ Downloading...")
-            await self.download_video(update, url, platform, actual_format, query=query)
-    
-    async def download_video(self, update: Update, url: str, platform: str, format_spec: str, query=None):
-        """Download video with specific format"""
-        try:
-            # Determine if this is from callback or message
-            from_callback = query is not None
-            message = query.message if from_callback else update.message
-            
-            if not message:
-                error_msg = "❌ Message not found!"
-                if query:
-                    await query.edit_message_text(error_msg)
-                else:
-                    await update.message.reply_text(error_msg)
-                return
-            
-            # Update status message
-            status_msg = f"⏳ Downloading {platform.capitalize()} video..."
-            if from_callback:
-                await query.edit_message_text(status_msg)
-            else:
-                status_message = await update.message.reply_text(status_msg)
-            
-            # Get video info first for caption
-            info = await self.get_video_info(url, platform)
-            if not info:
-                error_msg = "❌ Could not get video information"
-                if from_callback:
-                    await query.edit_message_text(error_msg)
-                else:
-                    await update.message.reply_text(error_msg)
-                return
-            
-            # Extract caption
-            caption = self.extract_caption(info, platform)
-            
-            # Prepare yt-dlp options
-            ydl_opts = {
-                'format': format_spec,
-                'quiet': True,
-                'outtmpl': str(self.download_dir / f'%(id)s.%(ext)s'),
-                'no_warnings': True,
-                'postprocessors': [],
-            }
-            
-            # Add platform-specific headers
-            if platform == 'facebook':
-                headers = self.get_facebook_cookie_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            elif platform == 'tiktok':
-                headers = self.get_tiktok_session_header()
-                if headers:
-                    ydl_opts['http_headers'] = headers
-            
-            # Add audio postprocessor for audio downloads
-            if format_spec == 'bestaudio':
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }]
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Now download
-                ydl.download([url])
-                
-                # Find the downloaded file
-                filename = ydl.prepare_filename(info)
-                
-                # For audio downloads, change extension to mp3
-                if format_spec == 'bestaudio':
-                    filename = filename.rsplit('.', 1)[0] + '.mp3'
-                
-                if not os.path.exists(filename):
-                    # Try to find with different extension
-                    for ext in ['.mp4', '.webm', '.mkv', '.m4a', '.mp3']:
-                        alt_name = filename.rsplit('.', 1)[0] + ext
-                        if os.path.exists(alt_name):
-                            filename = alt_name
+                    thumb_candidates = [
+                        os.path.splitext(downloaded_file)[0] + '.jpg',
+                        os.path.splitext(downloaded_file)[0] + '.webp',
+                    ]
+                    for thumb in thumb_candidates:
+                        if os.path.exists(thumb):
+                            thumbnail = thumb
                             break
                 
-                if os.path.exists(filename):
-                    file_size = os.path.getsize(filename) / (1024 * 1024)
-                    max_size = self.config['telegram']['max_file_size']
-                    
-                    if file_size > max_size:
-                        os.remove(filename)
-                        error_msg = f"❌ File too large: {file_size:.1f}MB"
-                        if from_callback:
-                            await query.edit_message_text(error_msg)
-                        else:
-                            await status_message.edit_text(error_msg)
-                        return
-                    
-                    # Upload status
-                    upload_msg = f"📤 Uploading ({file_size:.1f}MB)..."
-                    if from_callback:
-                        await query.edit_message_text(upload_msg)
-                    else:
-                        await status_message.edit_text(upload_msg)
-                    
-                    # Prepare final caption
-                    final_caption = f"📹 {platform.capitalize()} Video\n\n"
-                    
-                    # Add video title if available
-                    title = info.get('title', '')
-                    if title:
-                        final_caption += f"**{title}**\n\n"
-                    
-                    # Add caption if available
-                    if caption:
-                        final_caption += f"{caption}\n\n"
-                    
-                    # Add uploader info
-                    uploader = info.get('uploader', '')
-                    if uploader:
-                        final_caption += f"👤 {uploader}\n"
-                    
-                    # Add duration if available
-                    duration = info.get('duration', 0)
-                    if duration:
-                        minutes = duration // 60
-                        seconds = duration % 60
-                        final_caption += f"⏱️ {minutes}:{seconds:02d}\n"
-                    
-                    final_caption += f"📦 Size: {file_size:.1f}MB\n\n"
-                    final_caption += f"✅ Downloaded via Telegram Bot"
-                    
-                    # Send file
-                    with open(filename, 'rb') as f:
-                        if filename.endswith(('.mp3', '.m4a', '.opus')):
-                            await message.reply_audio(
-                                audio=f,
-                                caption=final_caption[:1024],
-                                title=info.get('title', 'Audio')[:50]
-                            )
-                        else:
-                            await message.reply_video(
-                                video=f,
-                                caption=final_caption[:1024],
-                                supports_streaming=True
-                            )
-                    
-                    success_msg = f"✅ {platform.capitalize()} download complete! ({file_size:.1f}MB)"
-                    if from_callback:
-                        await query.edit_message_text(success_msg)
-                    else:
-                        await status_message.edit_text(success_msg)
-                    
-                    # Schedule deletion
-                    self.schedule_file_deletion(filename)
-                    
-                else:
-                    error_msg = "❌ File not found after download"
-                    if from_callback:
-                        await query.edit_message_text(error_msg)
-                    else:
-                        await update.message.reply_text(error_msg)
-                        
+                return {
+                    'success': True,
+                    'file_path': downloaded_file,
+                    'thumbnail': thumbnail,
+                    'title': info.get('title', 'Video'),
+                    'duration': info.get('duration', 0),
+                    'uploader': info.get('uploader', 'Unknown'),
+                    'description': info.get('description', ''),
+                    'temp_dir': temp_dir
+                }
+                
         except Exception as e:
-            logger.error(f"Download error: {e}")
-            error_msg = f"❌ Error: {str(e)[:100]}"
-            if query:
-                await query.edit_message_text(error_msg)
-            else:
-                await update.message.reply_text(error_msg)
-    
-    def schedule_file_deletion(self, filepath):
-        """Schedule file deletion after 2 minutes"""
-        def delete_later():
-            time.sleep(120)
-            if os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    logger.info(f"Auto deleted: {os.path.basename(filepath)}")
-                except:
-                    pass
-        
-        threading.Thread(target=delete_later, daemon=True).start()
-    
-    def save_config(self):
-        """Save configuration to file"""
-        try:
-            with open('config.json', 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
-            logger.info("Configuration saved")
-        except Exception as e:
-            logger.error(f"Error saving config: {e}")
-    
-    async def handle_settings_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle settings input from users"""
-        text = update.message.text.strip()
-        
-        if context.user_data.get('awaiting_facebook_cookie'):
-            self.config['facebook_cookie'] = text
-            self.save_config()
-            await update.message.reply_text("✅ Facebook cookie saved!")
-            context.user_data.pop('awaiting_facebook_cookie', None)
-            
-        elif context.user_data.get('awaiting_tiktok_session'):
-            self.config['tiktok_session'] = text
-            self.save_config()
-            await update.message.reply_text("✅ TikTok session saved!")
-            context.user_data.pop('awaiting_tiktok_session', None)
-        
-        else:
-            # Normal message handling
-            await self.handle_message(update, context)
-    
-    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /status command"""
-        user = update.effective_user
-        if user.id not in self.admin_ids and len(self.admin_ids) > 0:
-            await update.message.reply_text("⛔ Admin only!")
-            return
-        
-        files = list(self.download_dir.glob('*'))
-        total_size = sum(f.stat().st_size for f in files if f.is_file()) / (1024 * 1024)
-        
-        facebook_cookie = self.config.get('facebook_cookie', '')
-        tiktok_session = self.config.get('tiktok_session', '')
-        
-        status_text = f"""
-📊 **Bot Status**
-
-✅ Bot active
-📁 Temp files: {len(files)}
-💾 Temp size: {total_size:.1f}MB
-👤 Your ID: {user.id}
-
-⚙️ **Settings:**
-Max file size: {self.config['telegram']['max_file_size']}MB
-Auto cleanup: Every 2 minutes
-Facebook cookie: {'✅ Set' if facebook_cookie else '❌ Not set'}
-TikTok session: {'✅ Set' if tiktok_session else '❌ Not set'}
-"""
-        
-        await update.message.reply_text(status_text, parse_mode='Markdown')
-    
-    async def pause_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /pause command"""
-        user = update.effective_user
-        if user.id not in self.admin_ids and len(self.admin_ids) > 0:
-            await update.message.reply_text("⛔ Admin only!")
-            return
-        
-        hours = 1
-        if context.args:
+            logger.error(f"Download failed: {e}")
+            # Cleanup temp dir
             try:
-                hours = int(context.args[0])
-            except:
-                hours = 1
-        
-        self.is_paused = True
-        self.paused_until = datetime.now() + timedelta(hours=hours)
-        
-        await update.message.reply_text(
-            f"⏸️ Bot paused for {hours} hour(s)\n"
-            f"Resume at: {self.paused_until.strftime('%H:%M')}"
-        )
-    
-    async def resume_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /resume command"""
-        user = update.effective_user
-        if user.id not in self.admin_ids and len(self.admin_ids) > 0:
-            await update.message.reply_text("⛔ Admin only!")
-            return
-        
-        self.is_paused = False
-        self.paused_until = None
-        await update.message.reply_text("▶️ Bot resumed!")
-    
-    async def clean_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /clean command"""
-        user = update.effective_user
-        if user.id not in self.admin_ids and len(self.admin_ids) > 0:
-            await update.message.reply_text("⛔ Admin only!")
-            return
-        
-        files = list(self.download_dir.glob('*'))
-        count = len(files)
-        
-        for f in files:
-            try:
-                f.unlink()
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
-        
-        await update.message.reply_text(f"🧹 Cleaned {count} files")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
-    def run(self):
-        """Run the bot"""
-        print("=" * 50)
-        print("🤖 Facebook & TikTok Downloader Bot")
-        print("📥 Download videos with captions")
-        print("=" * 50)
+    @staticmethod
+    def progress_hook(d):
+        """Progress hook for yt-dlp"""
+        if d['status'] == 'downloading':
+            percent = d.get('_percent_str', '0%').strip()
+            speed = d.get('_speed_str', 'N/A')
+            eta = d.get('_eta_str', 'N/A')
+            logger.info(f"Downloading: {percent} | Speed: {speed} | ETA: {eta}")
+
+class BotHandlers:
+    """Telegram bot handlers"""
+    
+    @staticmethod
+    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        user = update.effective_user
+        bot_stats["users"].add(user.id)
         
-        if not self.token or self.token == 'YOUR_BOT_TOKEN_HERE':
-            print("❌ ERROR: Configure token in config.json")
+        await update.message.reply_text(
+            config.MESSAGES["start"],
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    @staticmethod
+    async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command"""
+        await update.message.reply_text(
+            config.MESSAGES["help"],
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    @staticmethod
+    async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /about command"""
+        await update.message.reply_text(
+            config.MESSAGES["about"],
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    @staticmethod
+    async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stats command"""
+        if update.effective_user.id not in config.ADMIN_IDS and config.ADMIN_IDS:
+            await update.message.reply_text("⚠️ Admin only command")
             return
         
-        print(f"✅ Token: {self.token[:15]}...")
-        print(f"✅ Max file size: {self.config['telegram']['max_file_size']}MB")
-        print("✅ Bot ready!")
-        print("📱 Send Facebook/TikTok/Instagram link to download")
-        print("=" * 50)
+        uptime = datetime.now() - bot_stats["start_time"]
+        stats_text = f"""
+📊 **Bot Statistics**
+
+⏱ **Uptime:** {str(uptime).split('.')[0]}
+📥 **Downloads:** {bot_stats["downloads"]}
+❌ **Errors:** {bot_stats["errors"]}
+👥 **Users:** {len(bot_stats["users"])}
+💾 **Free Space:** {BotHandlers.get_free_space()}
+
+**Last Update:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+    
+    @staticmethod
+    def get_free_space():
+        """Get free disk space"""
+        try:
+            import shutil
+            total, used, free = shutil.disk_usage(".")
+            return f"{free // (2**30)}GB free"
+        except:
+            return "Unknown"
+    
+    @staticmethod
+    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming messages"""
+        user = update.effective_user
+        message = update.message
+        text = message.text.strip()
         
-        app = Application.builder().token(self.token).build()
+        # Extract URL
+        url_pattern = r'https?://[^\s]+'
+        urls = re.findall(url_pattern, text)
         
-        app.add_handler(CommandHandler("start", self.start_command))
-        app.add_handler(CommandHandler("help", self.help_command))
-        app.add_handler(CommandHandler("status", self.status_command))
-        app.add_handler(CommandHandler("pause", self.pause_command))
-        app.add_handler(CommandHandler("resume", self.resume_command))
-        app.add_handler(CommandHandler("clean", self.clean_command))
-        app.add_handler(CommandHandler("settings", self.settings_command))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_settings_input))
-        app.add_handler(CallbackQueryHandler(self.handle_callback))
+        if not urls:
+            await message.reply_text("Please send a valid video URL.")
+            return
         
-        app.run_polling()
+        url = urls[0]
+        
+        # Check if supported
+        if not VideoDownloader.is_supported_url(url):
+            platforms = ", ".join(config.SUPPORTED_PLATFORMS)
+            await message.reply_text(
+                f"❌ Unsupported URL.\n\nSupported platforms:\n{platforms}"
+            )
+            return
+        
+        # Send processing message
+        status_msg = await message.reply_text(
+            "🔄 Processing your request...\n"
+            "⏳ Downloading video, please wait..."
+        )
+        
+        try:
+            # Get video info first
+            video_info = VideoDownloader.extract_video_info(url)
+            if not video_info:
+                await status_msg.edit_text("❌ Failed to get video information.")
+                return
+            
+            # Update status
+            await status_msg.edit_text(
+                f"📥 Downloading: *{video_info['title']}*\n"
+                f"👤 From: {video_info['uploader']}\n"
+                f"⏱ Duration: {video_info['duration']}s"
+            )
+            
+            # Download video
+            result = VideoDownloader.download_video(url, user.id)
+            
+            if not result['success']:
+                bot_stats["errors"] += 1
+                await status_msg.edit_text(f"❌ Download failed:\n{result['error']}")
+                return
+            
+            # Check file size
+            file_size = os.path.getsize(result['file_path'])
+            if file_size > config.MAX_FILE_SIZE:
+                await status_msg.edit_text(
+                    f"❌ File too large ({file_size/(1024*1024):.2f}MB).\n"
+                    f"Max allowed: {config.MAX_FILE_SIZE/(1024*1024)}MB"
+                )
+                BotHandlers.cleanup_temp(result['temp_dir'])
+                return
+            
+            # Prepare caption
+            caption = BotHandlers.create_caption(result, url)
+            
+            # Send video
+            await status_msg.edit_text("📤 Uploading to Telegram...")
+            
+            with open(result['file_path'], 'rb') as video_file:
+                await message.reply_video(
+                    video=InputFile(video_file, filename=f"{result['title'][:50]}.mp4"),
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN,
+                    duration=result['duration'],
+                    supports_streaming=True,
+                    read_timeout=60,
+                    write_timeout=60,
+                    connect_timeout=60
+                )
+            
+            bot_stats["downloads"] += 1
+            await status_msg.edit_text("✅ Video sent successfully!")
+            
+            # Cleanup
+            BotHandlers.cleanup_temp(result['temp_dir'])
+            
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            bot_stats["errors"] += 1
+            try:
+                await status_msg.edit_text(f"❌ Error: {str(e)[:200]}")
+            except:
+                pass
+    
+    @staticmethod
+    def create_caption(result: dict, original_url: str) -> str:
+        """Create caption for video"""
+        title = result['title'][:100]
+        uploader = result['uploader'][:50]
+        duration = result['duration']
+        
+        caption = f"📹 *{title}*\n\n"
+        caption += f"👤 *Uploader:* {uploader}\n"
+        
+        if duration > 0:
+            mins, secs = divmod(duration, 60)
+            caption += f"⏱ *Duration:* {int(mins)}:{int(secs):02d}\n"
+        
+        if result.get('description'):
+            desc = result['description'][:150]
+            if len(result['description']) > 150:
+                desc += "..."
+            caption += f"\n📝 {desc}\n"
+        
+        caption += f"\n🔗 *Source:* [Click Here]({original_url})"
+        caption += f"\n\n🤖 *Sent by:* @{(await context.bot.get_me()).username}"
+        
+        return caption
+    
+    @staticmethod
+    def cleanup_temp(temp_dir: str):
+        """Cleanup temporary files"""
+        try:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
+    
+    @staticmethod
+    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors"""
+        logger.error(f"Error: {context.error}")
+        if update and update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "❌ An error occurred. Please try again."
+                )
+            except:
+                pass
 
 def main():
+    """Main function to start the bot"""
+    # Check token
+    if config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("\n" + "="*60)
+        print("ERROR: Bot token not set!")
+        print("="*60)
+        print("1. Get a token from @BotFather on Telegram")
+        print("2. Edit config.py or set BOT_TOKEN environment variable")
+        print("3. Example: export BOT_TOKEN='your_token_here'")
+        print("="*60 + "\n")
+        sys.exit(1)
+    
+    # Create application
+    print("🤖 Initializing bot...")
+    
+    # Set bot options
+    application = Application.builder() \
+        .token(config.BOT_TOKEN) \
+        .read_timeout(60) \
+        .write_timeout(60) \
+        .connect_timeout(60) \
+        .pool_timeout(60) \
+        .build()
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", BotHandlers.start))
+    application.add_handler(CommandHandler("help", BotHandlers.help))
+    application.add_handler(CommandHandler("about", BotHandlers.about))
+    application.add_handler(CommandHandler("stats", BotHandlers.stats))
+    
+    # Handle text messages
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        BotHandlers.handle_message
+    ))
+    
+    # Error handler
+    application.add_error_handler(BotHandlers.error_handler)
+    
+    # Start bot
+    print("\n" + "="*60)
+    print("🎉 Bot is starting...")
+    print("📱 Bot uses polling (no port needed)")
+    print("🛑 Press Ctrl+C to stop")
+    print("="*60 + "\n")
+    
     try:
-        bot = FacebookTikTokBot()
-        bot.run()
+        # Run bot with polling
+        application.run_polling(
+            poll_interval=1.0,
+            timeout=60,
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
     except KeyboardInterrupt:
-        print("\n🛑 Bot stopped")
+        print("\n👋 Bot stopped by user")
     except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Bot crashed: {e}")
+        print(f"\n💥 Bot crashed: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
+EOF
+
+# Create requirements.txt
+cat > requirements.txt << 'EOF'
+python-telegram-bot==20.6
+yt-dlp>=2024.4.9
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+EOF
+
+# Create startup script
+cat > start_bot.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+
+echo "🤖 Starting Telegram Video Downloader Bot..."
+echo "📍 Directory: $(pwd)"
+echo "🐍 Python: $(python3 --version)"
+echo "🔄 Using polling method (no port required)"
+
+# Check if venv exists
+if [ ! -d "venv" ]; then
+    echo "❌ Virtual environment not found. Run install.sh first."
+    exit 1
+fi
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Check FFmpeg
+if ! command -v ffmpeg &> /dev/null; then
+    echo "❌ FFmpeg not found. Installing..."
+    wget -q https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz -O ffmpeg.tar.xz
+    tar -xf ffmpeg.tar.xz --strip-components=1
+    chmod +x ffmpeg ffprobe
+    sudo mv ffmpeg ffprobe /usr/local/bin/
+    echo "✅ FFmpeg installed"
+fi
+
+# Check bot token
+if grep -q "YOUR_BOT_TOKEN_HERE" config.py; then
+    echo ""
+    echo "❌ Bot token not configured!"
+    echo ""
+    echo "Please set your bot token:"
+    echo "1. Get token from @BotFather"
+    echo "2. Edit config.py and replace YOUR_BOT_TOKEN_HERE"
+    echo "3. Or run: export BOT_TOKEN='your_token_here'"
+    echo ""
+    read -p "Enter bot token now (or press Enter to skip): " BOT_TOKEN
+    if [ ! -z "$BOT_TOKEN" ]; then
+        sed -i "s/YOUR_BOT_TOKEN_HERE/$BOT_TOKEN/g" config.py
+        echo "✅ Token updated in config.py"
+    else
+        echo "⚠️  Using environment variable BOT_TOKEN"
+    fi
+fi
+
+# Run bot
+echo ""
+echo "🚀 Starting bot..."
+echo "📝 Logs will be saved to bot.log"
+echo "🛑 Press Ctrl+C to stop"
+echo ""
+
+exec python3 bot.py
+EOF
+
+chmod +x start_bot.sh
+
+# Create systemd service
+cat > telegram-bot.service << EOF
+[Unit]
+Description=Telegram Video Downloader Bot (Portless)
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$BOT_DIR
+Environment="PATH=$BOT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="BOT_TOKEN=YOUR_BOT_TOKEN_HERE"
+ExecStart=$BOT_DIR/start_bot.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create quick setup script
+cat > quick_setup.sh << 'EOF'
+#!/bin/bash
+echo "⚡ Quick Setup for Telegram Video Bot"
+echo ""
+
+# Get bot token
+read -p "Enter your Telegram Bot Token: " BOT_TOKEN
+if [ -z "$BOT_TOKEN" ]; then
+    echo "❌ Token is required!"
+    exit 1
+fi
+
+# Update config
+cd "$(dirname "$0")"
+sed -i "s/YOUR_BOT_TOKEN_HERE/$BOT_TOKEN/g" config.py
+
+# Set as environment variable
+echo "export BOT_TOKEN='$BOT_TOKEN'" >> ~/.bashrc
+export BOT_TOKEN="$BOT_TOKEN"
+
+echo ""
+echo "✅ Setup complete!"
+echo ""
+echo "To start bot manually:"
+echo "  cd ~/telegram-video-bot && ./start_bot.sh"
+echo ""
+echo "To run as service:"
+echo "  sudo cp telegram-bot.service /etc/systemd/system/"
+echo "  sudo systemctl daemon-reload"
+echo "  sudo systemctl enable telegram-bot"
+echo "  sudo systemctl start telegram-bot"
+EOF
+
+chmod +x quick_setup.sh
+
+# Create cleanup script
+cat > cleanup.sh << 'EOF'
+#!/bin/bash
+echo "🧹 Cleaning up old downloads..."
+cd "$(dirname "$0")"
+find ./downloads -type f -name "*.mp4" -mtime +1 -delete
+find ./downloads -type f -name "*.jpg" -mtime +1 -delete
+find ./downloads -type d -empty -delete
+echo "✅ Cleanup complete!"
+EOF
+
+chmod +x cleanup.sh
+
+# Create README
+cat > README.md << 'EOF'
+# Telegram Video Downloader Bot (Portless)
+
+## Features
+- 📥 Downloads from Facebook, TikTok, Instagram
+- 🚫 No port required (uses polling)
+- 📦 Includes FFmpeg (no separate installation)
+- 💾 Auto-cleanup of temp files
+- 📊 Statistics tracking
+
+## Quick Start
+
+1. **Set bot token:**
+   ```bash
+   ./quick_setup.sh
