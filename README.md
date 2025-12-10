@@ -5,7 +5,38 @@
 bash <(curl -s https://raw.githubusercontent.com/2amir563/khodam-facebook-tiktak-totelegram/main/install.sh)
 ```
 
+```
+cd telegram-video-bot
+./start.sh
+```
+🚀 Available Commands:
+  ./start.sh    - Start the bot
+  ./stop.sh     - Stop the bot
+  ./restart.sh  - Restart the bot
+  ./test.sh     - Test installation
 
+📱 Supported Platforms:
+  • TikTok, Facebook, YouTube, Instagram
+  • Twitter/X, Reddit, Pinterest, Likee
+  • Twitch, Dailymotion, Streamable, Vimeo
+  • Rumble, Bilibili, TED
+  • Aparat, Namava, Filimo, Tiva
+
+✨ Features:
+  ✅ Choose quality before download
+  ✅ See file size for each quality
+  ✅ Supports all requested platforms
+  ✅ Video information included
+  ✅ Max 50MB file size
+
+📝 To start the bot:
+1. cd telegram-video-bot
+2. ./start.sh
+
+🎯 Your bot token is saved in:
+  .env file
+
+🤖 Your bot is ready to use!
 ```
 bash <(curl -s https://raw.githubusercontent.com/2amir563/khodam-facebook-tiktak-totelegram/main/install.sh)
 ```
