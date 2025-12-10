@@ -55,7 +55,7 @@ fi
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved${NC}"
 
-# 6. Create simple bot.py
+# 6. Create improved bot.py with format fallback
 echo -e "${YELLOW}📝 Creating bot.py...${NC}"
 
 cat << 'EOF' > $BOT_FILE
@@ -109,7 +109,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📝 *Send me a link!*\n\n"
         "⚠️ *Note:*\n"
         "• Max 50MB\n• Public videos only\n"
-        "• Facebook needs direct video links"
+        "• Facebook: Use direct links\n"
+        "   ✅ https://www.facebook.com/watch/?v=123\n"
+        "   ✅ https://fb.watch/abc123/\n"
+        "   ✅ https://www.facebook.com/reel/123\n"
     )
     await update.message.reply_text(message, parse_mode='Markdown')
 
@@ -120,10 +123,16 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Copy video link\n"
         "2. Send to bot\n"
         "3. Get downloaded file\n\n"
-        "For Facebook:\n"
-        "Use: https://www.facebook.com/watch/?v=123456789\n"
-        "Not: https://www.facebook.com/share/r/...\n\n"
-        "Max size: 50MB"
+        "*For Facebook:*\n"
+        "✅ Working:\n"
+        "• https://www.facebook.com/watch/?v=123\n"
+        "• https://fb.watch/abc123/\n"
+        "• https://www.facebook.com/reel/123\n\n"
+        "❌ Not working:\n"
+        "• https://www.facebook.com/share/r/...\n"
+        "• Login pages\n\n"
+        "*Limits:*\n"
+        "• Max 50MB\n• Public videos only"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -135,16 +144,30 @@ def is_supported(url):
             return True
     return False
 
-async def download_video(url, output_dir):
-    """Download video using yt-dlp"""
+async def download_video(url, output_dir, platform=None):
+    """Download video using yt-dlp with fallback formats"""
     unique_id = uuid4().hex[:8]
     output_template = f"{output_dir}/{unique_id}.%(ext)s"
     
-    # Simple yt-dlp command without cookies
+    # Platform-specific format selection
+    if platform == "facebook":
+        # Facebook format chain with fallbacks
+        format_chain = [
+            "best[height<=720][filesize<=50M]",      # Try 720p first
+            "best[height<=480][filesize<=50M]",      # Then 480p
+            "best[filesize<=50M]",                   # Then any under 50MB
+            "worst[filesize<=50M]"                   # Finally worst quality
+        ]
+        format_str = "/".join(format_chain)
+    else:
+        # Other platforms - simple format
+        format_str = "best[filesize<=50M]/worst"
+    
+    # Build command
     cmd = [
         "yt-dlp",
         "--no-warnings",
-        "--format", "best[filesize<=50M]",
+        "--format", format_str,
         "--max-filesize", "50M",
         "--restrict-filenames",
         "-o", output_template,
@@ -152,6 +175,7 @@ async def download_video(url, output_dir):
     ]
     
     try:
+        logger.info(f"Downloading with command: {' '.join(cmd[:6])}...")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -162,13 +186,39 @@ async def download_video(url, output_dir):
         
         if process.returncode != 0:
             error = stderr.decode('utf-8', errors='ignore').strip()
-            if error:
-                # Get last error line
-                lines = error.split('\n')
-                for line in reversed(lines):
-                    if line.strip():
-                        return None, line.strip()
-            return None, "Download failed"
+            logger.error(f"Download error: {error}")
+            
+            # Check if it's a format error
+            if "format is not available" in error or "Requested format" in error:
+                logger.info("Format error detected, trying simple format...")
+                
+                # Try with simple format as fallback
+                simple_cmd = [
+                    "yt-dlp",
+                    "--no-warnings",
+                    "--format", "best",
+                    "--max-filesize", "50M",
+                    "--restrict-filenames",
+                    "-o", output_template,
+                    url
+                ]
+                
+                process2 = await asyncio.create_subprocess_exec(
+                    *simple_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout2, stderr2 = await asyncio.wait_for(process2.communicate(), timeout=300)
+                
+                if process2.returncode != 0:
+                    error2 = stderr2.decode('utf-8', errors='ignore').strip()
+                    if error2:
+                        lines = error2.split('\n')
+                        for line in reversed(lines):
+                            if line.strip():
+                                return None, line.strip()
+                    return None, "Download failed with fallback too"
         
         # Find downloaded file
         for file in Path(output_dir).glob(f"{unique_id}.*"):
@@ -180,7 +230,26 @@ async def download_video(url, output_dir):
     except asyncio.TimeoutError:
         return None, "Download timeout"
     except Exception as e:
+        logger.error(f"Exception in download: {e}")
         return None, str(e)
+
+def detect_platform(url):
+    """Detect platform from URL"""
+    url_lower = url.lower()
+    if "facebook.com" in url_lower or "fb.watch" in url_lower:
+        return "facebook"
+    elif "tiktok.com" in url_lower:
+        return "tiktok"
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return "youtube"
+    elif "instagram.com" in url_lower:
+        return "instagram"
+    elif "twitter.com" in url_lower or "x.com" in url_lower:
+        return "twitter"
+    elif "reddit.com" in url_lower:
+        return "reddit"
+    else:
+        return "unknown"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming links"""
@@ -203,21 +272,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Detect platform
+    platform = detect_platform(text)
+    
     # Create user directory
     user_dir = Path(f"downloads/{chat_id}")
     user_dir.mkdir(parents=True, exist_ok=True)
     
     # Send processing message
-    msg = await update.message.reply_text("⏳ Processing...")
+    msg = await update.message.reply_text(f"⏳ Processing {platform} link...")
     
     file_path = None
     try:
         # Download video
-        await msg.edit_text("⬇️ Downloading...")
-        file_path, error = await download_video(text, str(user_dir))
+        await msg.edit_text(f"⬇️ Downloading from {platform}...")
+        file_path, error = await download_video(text, str(user_dir), platform)
         
         if error:
-            await msg.edit_text(f"❌ Error: {error}")
+            # Format error specific message
+            if "format is not available" in error:
+                await msg.edit_text(
+                    f"❌ Format error on {platform}.\n\n"
+                    "This video might not be available in the requested format.\n"
+                    "Try a different video or platform."
+                )
+            else:
+                await msg.edit_text(f"❌ Error: {error}")
             return
         
         if not file_path or not file_path.exists():
@@ -236,40 +316,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         with open(file_path, 'rb') as f:
             # Check file type
-            result = subprocess.run(
-                ['file', '-b', '--mime-type', str(file_path)],
-                capture_output=True, text=True
-            )
-            mime_type = result.stdout.strip() if result.returncode == 0 else 'video/mp4'
+            try:
+                result = subprocess.run(
+                    ['file', '-b', '--mime-type', str(file_path)],
+                    capture_output=True, text=True, timeout=5
+                )
+                mime_type = result.stdout.strip() if result.returncode == 0 else 'video/mp4'
+            except:
+                mime_type = 'video/mp4'
             
             if mime_type.startswith('video'):
                 await update.message.reply_video(
                     video=f,
-                    caption="✅ Downloaded",
-                    supports_streaming=True
+                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    supports_streaming=True,
+                    read_timeout=120,
+                    write_timeout=120
                 )
             elif mime_type.startswith('image'):
                 await update.message.reply_photo(
                     photo=f,
-                    caption="✅ Downloaded"
+                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    read_timeout=60
                 )
             else:
                 await update.message.reply_document(
                     document=f,
-                    caption="✅ Downloaded"
+                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    read_timeout=60
                 )
         
-        await msg.edit_text(f"✅ Done! Size: {file_size/1024/1024:.1f}MB")
+        await msg.edit_text(f"✅ Done! {platform} - {file_size/1024/1024:.1f}MB")
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        await msg.edit_text(f"❌ Error: {str(e)}")
+        error_msg = f"❌ Error: {str(e)}"
+        if platform == "facebook":
+            error_msg += "\n\n💡 *Facebook Tip:* Try a different video or use TikTok/YouTube"
+        await msg.edit_text(error_msg, parse_mode='Markdown')
     
     finally:
         # Cleanup
         if file_path and file_path.exists():
             try:
                 file_path.unlink()
+                logger.info(f"Cleaned up: {file_path}")
             except:
                 pass
 
@@ -357,6 +448,7 @@ cat << 'EOF' > test.py
 
 import sys
 import os
+import subprocess
 
 print("🔧 Testing installation...")
 print("=" * 30)
@@ -370,37 +462,64 @@ except:
     sys.exit(1)
 
 # Check packages
-packages = ["telegram", "dotenv", "yt_dlp"]
+packages = ["telegram", "dotenv"]
 for pkg in packages:
     try:
         __import__(pkg)
         print(f"✅ {pkg}")
-    except:
-        print(f"❌ {pkg}")
+    except ImportError as e:
+        print(f"❌ {pkg}: {e}")
+
+# Check yt-dlp package
+try:
+    import yt_dlp
+    print("✅ yt-dlp package")
+except ImportError:
+    print("⚠️ yt-dlp Python package missing (but CLI may work)")
 
 # Check .env
 if os.path.exists(".env"):
-    print("✅ .env exists")
+    with open(".env", "r") as f:
+        if "BOT_TOKEN=" in f.read():
+            print("✅ .env with BOT_TOKEN")
+        else:
+            print("❌ .env missing BOT_TOKEN")
 else:
     print("❌ .env missing")
 
-# Check yt-dlp
-import subprocess
+# Check yt-dlp CLI
 result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
 if result.returncode == 0:
-    print(f"✅ yt-dlp: {result.stdout.strip()}")
+    print(f"✅ yt-dlp CLI: {result.stdout.strip()}")
 else:
-    print("❌ yt-dlp not working")
+    print("❌ yt-dlp CLI not working")
+
+# Check directories
+for dir in ["downloads", "logs", "venv"]:
+    if os.path.exists(dir):
+        print(f"✅ Directory: {dir}")
+    else:
+        print(f"❌ Missing: {dir}")
 
 print("=" * 30)
-print("✅ Setup complete!")
+print("🎉 Setup complete!")
 print("\nTo start: ./start.sh")
 print("To stop:  ./stop.sh")
+print("\n💡 For Facebook issues:")
+print("- Try different videos")
+print("- Use TikTok/YouTube links")
+print("- Some Facebook videos have format restrictions")
 EOF
 
 chmod +x test.py
 
-# 9. Final instructions
+# 9. Create requirements.txt
+cat << 'EOF' > requirements.txt
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+EOF
+
+# 10. Final instructions
 echo -e "\n${GREEN}==========================================${NC}"
 echo -e "${GREEN}✅ Setup Complete!${NC}"
 echo -e "${GREEN}==========================================${NC}"
@@ -417,13 +536,13 @@ echo -e "\n📝 ${YELLOW}Usage:${NC}"
 echo -e "  1. Start bot: ./start.sh"
 echo -e "  2. Send /start to your bot"
 echo -e "  3. Send video link"
-echo -e "\n${RED}⚠️ Note:${NC}"
-echo -e "  • No Chrome/cookies needed"
-echo -e "  • Facebook: Use direct video links"
+echo -e "\n${RED}⚠️ Important:${NC}"
+echo -e "  • Some Facebook videos have format restrictions"
+echo -e "  • TikTok/YouTube work best"
 echo -e "  • Max 50MB per file"
-echo -e "\n${GREEN}🤖 Done!${NC}"
+echo -e "\n${GREEN}🤖 Bot ready!${NC}"
 
-# 10. Test and ask to start
+# 11. Test and ask to start
 echo -e "\n${YELLOW}Test installation? (y/n)${NC}"
 read -r TEST
 
