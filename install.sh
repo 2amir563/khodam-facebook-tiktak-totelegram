@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # =========================================================
-#         Integrated Telegram Downloader Bot Setup
+#         Universal Social Media Downloader Bot
 # =========================================================
-# This single script handles the installation, configuration, and execution
-# of a Telegram downloader bot using yt-dlp and Python.
+# This script installs a Telegram bot that downloads videos from various platforms
 
 set -e  # Stop on any error
 
@@ -19,149 +18,120 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🛠️ Starting Telegram Downloader Bot Installation...${NC}"
+echo -e "${GREEN}🛠️ Installing Universal Social Media Downloader Bot...${NC}"
 
-# Clean up any existing virtual environment
-echo -e "${YELLOW}🧹 Cleaning up previous installation...${NC}"
-rm -rf venv downloads logs cookies
+# Clean up previous installation
+echo -e "${YELLOW}🧹 Cleaning up...${NC}"
+rm -rf venv downloads logs cookies 2>/dev/null || true
 mkdir -p downloads logs cookies
 
-# 1. Update packages and install prerequisites
-echo -e "${YELLOW}📦 Updating system packages and installing dependencies...${NC}"
+# 1. Install system dependencies
+echo -e "${YELLOW}📦 Installing system dependencies...${NC}"
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv git curl libmagic1 ffmpeg wget
 
-# Check Python version
-PYTHON_VERSION=$(python3 --version)
-echo -e "${GREEN}✅ Python version: $PYTHON_VERSION${NC}"
-
-# 2. Install yt-dlp
+# 2. Install yt-dlp system-wide
 echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
+echo -e "${GREEN}✅ yt-dlp version: $(yt-dlp --version)${NC}"
 
-# Test yt-dlp
-yt-dlp --version
-echo -e "${GREEN}✅ yt-dlp installed${NC}"
-
-# 3. Create virtual environment properly
+# 3. Create virtual environment
 echo -e "${YELLOW}🐍 Creating Python virtual environment...${NC}"
 
-# First, check if we need to clean python3 symlinks
-if [ -L "/usr/bin/python3" ]; then
-    echo -e "${YELLOW}⚠️ Found symbolic link for python3, checking...${NC}"
-    REAL_PYTHON=$(readlink -f /usr/bin/python3)
-    echo -e "${GREEN}Real python3 path: $REAL_PYTHON${NC}"
-fi
+# Find Python executable
+PYTHON_EXEC=$(which python3)
+echo -e "${YELLOW}Using Python: $PYTHON_EXEC${NC}"
 
-# Remove any broken venv
-rm -rf venv
-
-# Create virtual environment with explicit python path
-PYTHON_PATH=$(which python3)
-echo -e "${YELLOW}Using Python at: $PYTHON_PATH${NC}"
-
-$PYTHON_PATH -m venv venv --clear
-
-# Verify venv creation
-if [ ! -f "venv/bin/activate" ]; then
-    echo -e "${RED}❌ Failed to create virtual environment${NC}"
-    echo -e "${YELLOW}Trying alternative method...${NC}"
-    
-    # Try pip install virtualenv
-    pip3 install virtualenv --user
-    virtualenv venv
-fi
+# Create fresh virtual environment
+$PYTHON_EXEC -m venv venv --clear
 
 # Activate virtual environment
 source venv/bin/activate
 
-# Check if activation worked
+# Verify activation
 if [ -z "$VIRTUAL_ENV" ]; then
     echo -e "${RED}❌ Virtual environment activation failed${NC}"
-    echo -e "${YELLOW}Using system Python instead...${NC}"
-else
-    echo -e "${GREEN}✅ Virtual environment activated: $VIRTUAL_ENV${NC}"
+    echo -e "${YELLOW}Trying alternative...${NC}"
+    if [ -f "venv/bin/activate" ]; then
+        . venv/bin/activate
+    fi
 fi
+
+echo -e "${GREEN}✅ Virtual environment: $VIRTUAL_ENV${NC}"
 
 # 4. Install Python packages
 echo -e "${YELLOW}📦 Installing Python packages...${NC}"
 
-# Upgrade pip first
+# Upgrade pip
 python3 -m pip install --upgrade pip
 
 # Install packages with retry logic
-install_packages() {
-    local packages=("$@")
-    for package in "${packages[@]}"; do
-        echo -e "${YELLOW}Installing $package...${NC}"
-        
-        # Try with default pip
-        if python3 -m pip install "$package" --no-cache-dir; then
-            echo -e "${GREEN}✅ $package installed${NC}"
-        else
-            echo -e "${YELLOW}⚠️ Retrying $package with different method...${NC}"
-            
-            # Try without dependencies first
-            if python3 -m pip install "$package" --no-deps --no-cache-dir; then
-                echo -e "${GREEN}✅ $package installed (without deps)${NC}"
-                
-                # Try to install dependencies separately
-                if [ "$package" == "python-telegram-bot" ]; then
-                    python3 -m pip install "httpx~=0.24.0" "cryptography" --no-cache-dir
-                fi
-            else
-                echo -e "${RED}❌ Failed to install $package${NC}"
-                echo -e "${YELLOW}Trying from GitHub...${NC}"
-                
-                # Try GitHub for specific packages
-                case "$package" in
-                    "python-telegram-bot")
-                        python3 -m pip install "python-telegram-bot[job-queue]" --no-cache-dir || \
-                        python3 -m pip install "https://github.com/python-telegram-bot/python-telegram-bot/archive/refs/tags/v20.7.tar.gz" --no-cache-dir
-                        ;;
-                    "browser-cookie3")
-                        python3 -m pip install "browser-cookie3" --no-cache-dir || \
-                        echo -e "${YELLOW}⚠️ browser-cookie3 may not be available, skipping...${NC}"
-                        ;;
-                    *)
-                        echo -e "${YELLOW}⚠️ Skipping $package${NC}"
-                        ;;
-                esac
-            fi
-        fi
-    done
+install_package() {
+    local package=$1
+    echo -e "${YELLOW}Installing $package...${NC}"
+    
+    # Try normal installation
+    if python3 -m pip install "$package" --no-cache-dir; then
+        echo -e "${GREEN}✅ $package installed${NC}"
+        return 0
+    fi
+    
+    # Try without dependencies
+    echo -e "${YELLOW}Retrying $package without dependencies...${NC}"
+    if python3 -m pip install "$package" --no-deps --no-cache-dir; then
+        echo -e "${GREEN}✅ $package installed (no deps)${NC}"
+        return 0
+    fi
+    
+    # Try alternative versions
+    case "$package" in
+        "python-telegram-bot[job-queue]")
+            echo -e "${YELLOW}Trying basic python-telegram-bot...${NC}"
+            python3 -m pip install "python-telegram-bot" --no-cache-dir && \
+            echo -e "${GREEN}✅ python-telegram-bot installed${NC}" && return 0
+            ;;
+        "yt-dlp")
+            # yt-dlp is already installed system-wide
+            echo -e "${GREEN}✅ yt-dlp available system-wide${NC}"
+            return 0
+            ;;
+    esac
+    
+    echo -e "${RED}❌ Failed to install $package${NC}"
+    return 1
 }
 
-# List of packages to install
+# Install packages
 PACKAGES=(
     "python-telegram-bot[job-queue]"
     "python-dotenv"
-    "uuid"
     "requests"
     "yt-dlp"
 )
 
-install_packages "${PACKAGES[@]}"
+for package in "${PACKAGES[@]}"; do
+    install_package "$package" || true
+done
 
-# Try to install browser-cookie3 separately (optional)
-echo -e "${YELLOW}🍪 Installing browser-cookie3 (optional for Facebook)...${NC}"
-python3 -m pip install "browser-cookie3" --no-cache-dir 2>/dev/null || \
-echo -e "${YELLOW}⚠️ browser-cookie3 installation failed (optional package)${NC}"
+# Install browser-cookie3 if possible (optional for Facebook)
+echo -e "${YELLOW}🍪 Installing browser-cookie3 (optional)...${NC}"
+python3 -m pip install browser-cookie3 --no-cache-dir 2>/dev/null || \
+echo -e "${YELLOW}⚠️ browser-cookie3 not installed (optional)${NC}"
 
-# 5. Configure Bot Token
+# 5. Get Bot Token
 echo -e "${GREEN}🤖 Telegram Bot Configuration${NC}"
-echo -e "${YELLOW}Please enter your Telegram Bot Token (from @BotFather):${NC}"
+echo -e "${YELLOW}Enter your Telegram Bot Token (from @BotFather):${NC}"
 read -r BOT_TOKEN
 
-# Validate token format
+# Validate token
 if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
-    echo -e "${RED}❌ Invalid bot token format! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ${NC}"
-    echo -e "${YELLOW}Please enter a valid token:${NC}"
+    echo -e "${RED}❌ Invalid token format! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ${NC}"
+    echo -e "${YELLOW}Enter token:${NC}"
     read -r BOT_TOKEN
     
     if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
-        echo -e "${RED}❌ Invalid token again. Exiting...${NC}"
+        echo -e "${RED}❌ Invalid token. Exiting...${NC}"
         exit 1
     fi
 fi
@@ -192,7 +162,7 @@ MAX_CONCURRENT_DOWNLOADS = 3
 DOWNLOAD_BASE_DIR = "./downloads"
 LOG_FILE = "./logs/bot.log"
 
-# Platform-specific URL patterns
+# Platform URL patterns
 PLATFORM_PATTERNS = {
     "facebook": {
         "valid": [
@@ -217,10 +187,7 @@ PLATFORM_PATTERNS = {
             r'vm\.tiktok\.com/[^/]+',
             r'vt\.tiktok\.com/[^/]+'
         ],
-        "invalid": [
-            r'tiktok\.com/login',
-            r'tiktok\.com/redirect'
-        ]
+        "invalid": []
     },
     "youtube": {
         "valid": [
@@ -246,10 +213,16 @@ PLATFORM_PATTERNS = {
             r'x\.com/[^/]+/status/\d+'
         ],
         "invalid": []
+    },
+    "reddit": {
+        "valid": [
+            r'reddit\.com/r/[^/]+/comments/[^/]+'
+        ],
+        "invalid": []
     }
 }
 
-# yt-dlp Configuration
+# yt-dlp Configuration for each platform
 YT_DLP_OPTIONS = {
     'common': [
         '--no-warnings',
@@ -261,33 +234,56 @@ YT_DLP_OPTIONS = {
         '--concurrent-fragments', '4',
     ],
     'facebook': [
-        '--format', 'best[height<=720][filesize<=50M]',
+        '--format', 'best[height<=720][filesize<=50M]/best[height<=480]/best[height<=360]/best',
         '--max-filesize', '50M',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--cookies-from-browser', 'chrome'
     ],
     'tiktok': [
-        '--format', 'best[filesize<=50M]',
+        '--format', 'best[filesize<=50M]/worst',
         '--max-filesize', '50M'
     ],
     'youtube': [
-        '--format', 'best[filesize<=50M]',
+        '--format', 'best[height<=720][filesize<=50M]/best[height<=480]/best[height<=360]/best',
+        '--max-filesize', '50M'
+    ],
+    'instagram': [
+        '--format', 'best[filesize<=50M]/worst',
+        '--max-filesize', '50M'
+    ],
+    'twitter': [
+        '--format', 'best[filesize<=50M]/worst',
+        '--max-filesize', '50M'
+    ],
+    'reddit': [
+        '--format', 'best[filesize<=50M]/worst',
         '--max-filesize', '50M'
     ],
     'default': [
-        '--format', 'best[filesize<=50M]',
+        '--format', 'best[filesize<=50M]/worst',
         '--max-filesize', '50M'
     ]
 }
+
+def get_ytdlp_options(platform):
+    """Get yt-dlp options for specific platform"""
+    options = YT_DLP_OPTIONS['common'].copy()
+    
+    if platform in YT_DLP_OPTIONS:
+        options.extend(YT_DLP_OPTIONS[platform])
+    else:
+        options.extend(YT_DLP_OPTIONS['default'])
+    
+    return options
 
 def clean_url(url: str) -> str:
     """Clean URL by removing tracking parameters"""
     import urllib.parse
     
-    # Remove common tracking parameters
+    # Remove Facebook specific tracking
     params_to_remove = [
         '_fb_noscript', '__tn__', '__cft__', '__xts__', 'rdid', 'e',
-        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-        'fbclid', 'gclid', 'msclkid'
+        'utm_source', 'utm_medium', 'utm_campaign', 'fbclid'
     ]
     
     try:
@@ -307,6 +303,10 @@ def clean_url(url: str) -> str:
         # Decode URL
         cleaned = urllib.parse.unquote(cleaned)
         
+        # Remove double question marks
+        cleaned = cleaned.replace('??', '?').replace('?&', '?')
+        cleaned = cleaned.rstrip('&?')
+        
         return cleaned
     except:
         return url
@@ -321,7 +321,7 @@ def validate_url_for_platform(url: str, platform: str) -> dict:
             if re.search(pattern, url_lower):
                 return {
                     "valid": False,
-                    "error": f"Invalid {platform} link detected. This appears to be a login/redirect/tracking link."
+                    "error": f"Invalid {platform} link format detected."
                 }
     
     # Check valid patterns
@@ -330,7 +330,7 @@ def validate_url_for_platform(url: str, platform: str) -> dict:
             if re.search(pattern, url_lower):
                 return {"valid": True}
     
-    return {"valid": False, "error": "Link format not recognized for this platform."}
+    return {"valid": False, "error": "Link format not recognized."}
 EOF
 
 # 7. Create the main bot file
@@ -347,10 +347,12 @@ import re
 import logging
 import subprocess
 import asyncio
+import json
 import urllib.parse
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
+from typing import Optional, Dict
 
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -414,8 +416,8 @@ class URLValidator:
             return 'unknown'
     
     @staticmethod
-    def validate_url(url: str) -> dict:
-        """Validate URL and return platform info with detailed feedback"""
+    def validate_url(url: str) -> Dict:
+        """Validate URL and return platform info"""
         # Basic URL validation
         if not url.startswith(('http://', 'https://')):
             return {
@@ -423,7 +425,7 @@ class URLValidator:
                 "error": "❌ Invalid URL format. Please send a valid URL starting with http:// or https://"
             }
         
-        # Clean URL first
+        # Clean URL
         cleaned_url = bot_config.clean_url(url)
         
         # Detect platform
@@ -441,10 +443,13 @@ class URLValidator:
         if not validation["valid"]:
             error_msg = validation.get("error", f"Invalid {platform} link.")
             
-            # Add platform-specific guidance
-            guidance = URLValidator.get_platform_guidance(platform)
-            if guidance:
-                error_msg += f"\n\n{guidance}"
+            # Add guidance for Facebook
+            if platform == 'facebook':
+                error_msg += "\n\n📘 *Facebook Guide:*\n"
+                error_msg += "• Use direct video links like:\n"
+                error_msg += "  `https://www.facebook.com/watch/?v=123456789`\n"
+                error_msg += "  `https://fb.watch/abc123def/`\n"
+                error_msg += "• Avoid login/share redirect links"
             
             return {
                 "valid": False,
@@ -459,54 +464,6 @@ class URLValidator:
             "url": cleaned_url,
             "original_url": url
         }
-    
-    @staticmethod
-    def get_platform_guidance(platform: str) -> str:
-        """Get guidance for specific platform"""
-        guidance = {
-            "facebook": (
-                "📘 *Facebook Link Guide:*\n"
-                "✅ Use DIRECT video links like:\n"
-                "• https://www.facebook.com/watch/?v=123456789\n"
-                "• https://fb.watch/abc123def/\n"
-                "• https://www.facebook.com/username/videos/123456789\n\n"
-                "❌ Avoid these:\n"
-                "• Login pages (facebook.com/login)\n"
-                "• Share redirects (facebook.com/share/r/)\n"
-                "• Links with '_fb_noscript=1'\n\n"
-                "💡 *Tip:* Click on video timestamp to get direct link."
-            ),
-            "tiktok": (
-                "📘 *TikTok Link Guide:*\n"
-                "✅ Use standard TikTok links:\n"
-                "• https://www.tiktok.com/@username/video/123456789\n"
-                "• https://vm.tiktok.com/abc123def/\n\n"
-                "❌ Avoid:\n"
-                "• Private/direct message links\n"
-                "• Deleted videos\n"
-                "• Login/redirect pages"
-            ),
-            "instagram": (
-                "📘 *Instagram Link Guide:*\n"
-                "✅ Use public post links:\n"
-                "• https://www.instagram.com/p/abc123def/\n"
-                "• https://www.instagram.com/reel/abc123def/\n\n"
-                "❌ Avoid:\n"
-                "• Private account posts\n"
-                "• Stories (unless public)\n"
-                "• Login pages"
-            ),
-            "youtube": (
-                "📘 *YouTube Link Guide:*\n"
-                "✅ Standard links work fine:\n"
-                "• https://www.youtube.com/watch?v=abc123def\n"
-                "• https://youtu.be/abc123def\n"
-                "• https://www.youtube.com/shorts/abc123def\n\n"
-                "⚠️ Note: Max 50MB file size"
-            )
-        }
-        
-        return guidance.get(platform, "Please ensure the content is public and accessible.")
 
 class DownloadManager:
     def __init__(self):
@@ -528,7 +485,6 @@ class DownloadManager:
                     file_age = now - datetime.fromtimestamp(file_path.stat().st_mtime)
                     if file_age.total_seconds() > max_age_hours * 3600:
                         file_path.unlink()
-                        logger.debug(f"Cleaned up old file: {file_path}")
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
 
@@ -537,56 +493,49 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
         "👋 *Universal Downloader Bot*\n\n"
         "📥 *Supported Platforms:*\n"
-        "• *Facebook*: Public videos\n"
-        "• *TikTok*: All public videos\n"
-        "• *YouTube*: Videos, Shorts (50MB max)\n"
-        "• *Instagram*: Posts, Reels\n"
-        "• *Twitter/X*: Videos\n"
-        "• *Reddit*: Videos\n"
-        "• *Terabox*: Videos\n"
-        "• *Streamable*: Videos\n"
-        "• *Pinterest*: Images & Videos\n"
-        "• *Snapchat*: Spotlight\n"
-        "• *Loom*: Videos\n"
-        "• *Likee*: Videos\n"
-        "• *DailyMotion*: Videos\n"
-        "• *Bilibili*: Videos\n"
-        "• *Twitch*: Clips\n"
-        "• *Vimeo*: Videos\n\n"
+        "• Facebook (Videos, Reels)\n"
+        "• TikTok (All videos)\n"
+        "• YouTube (Videos, Shorts)\n"
+        "• Instagram (Posts, Reels)\n"
+        "• Twitter/X (Videos)\n"
+        "• Reddit (Videos)\n"
+        "• 10+ other platforms\n\n"
         "📝 *How to use:*\n"
         "Send me a link from any supported platform!\n\n"
-        "⚠️ *Important:*\n"
+        "⚠️ *Limitations:*\n"
         "• Max file size: 50MB\n"
-        "• Only public content\n"
-        "• No login/redirect links\n\n"
+        "• Public content only\n"
+        "• Direct video links (no login pages)\n\n"
         "🔧 *Commands:*\n"
         "/start - Show this message\n"
         "/help - Get help\n"
-        "/guide - Platform-specific guides\n"
+        "/fbhelp - Facebook specific help\n"
         "/examples - Example links"
     )
     await update.message.reply_text(welcome_msg, parse_mode='Markdown')
 
-async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show platform guides"""
-    guide_msg = (
-        "📘 *Platform Guides*\n\n"
-        "*Facebook:*\n"
-        "Use direct video links:\n"
-        "`https://www.facebook.com/watch/?v=123456789`\n"
-        "`https://fb.watch/abc123def/`\n\n"
-        "*TikTok:*\n"
-        "`https://www.tiktok.com/@user/video/123456789`\n"
-        "`https://vm.tiktok.com/abc123def/`\n\n"
-        "*YouTube:*\n"
-        "`https://www.youtube.com/watch?v=abc123def`\n"
-        "`https://youtu.be/abc123def`\n\n"
-        "*Instagram:*\n"
-        "`https://www.instagram.com/p/abc123def/`\n"
-        "`https://www.instagram.com/reel/abc123def/`\n\n"
-        "Need specific help? Send your link!"
+async def fbhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Facebook specific help"""
+    help_msg = (
+        "📘 *Facebook Download Guide*\n\n"
+        "✅ *Working links:*\n"
+        "```\n"
+        "https://www.facebook.com/watch/?v=123456789\n"
+        "https://fb.watch/abc123def/\n"
+        "https://www.facebook.com/username/videos/123456789\n"
+        "https://www.facebook.com/reel/123456789\n"
+        "```\n\n"
+        "❌ *Non-working links:*\n"
+        "• Login pages: `facebook.com/login/...`\n"
+        "• Share redirects: `facebook.com/share/r/...`\n"
+        "• Links with `_fb_noscript=1`\n\n"
+        "💡 *How to get the right link:*\n"
+        "1. Open video in browser\n"
+        "2. Click on timestamp\n"
+        "3. Copy URL from address bar\n"
+        "4. Send it here"
     )
-    await update.message.reply_text(guide_msg, parse_mode='Markdown')
+    await update.message.reply_text(help_msg, parse_mode='Markdown')
 
 async def examples_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show example links"""
@@ -595,7 +544,7 @@ async def examples_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Facebook:*\n"
         "`https://www.facebook.com/watch/?v=123456789`\n\n"
         "*TikTok:*\n"
-        "`https://www.tiktok.com/@example/video/123456789`\n\n"
+        "`https://www.tiktok.com/@user/video/123456789`\n\n"
         "*YouTube:*\n"
         "`https://www.youtube.com/watch?v=dQw4w9WgXcQ`\n\n"
         "*Instagram:*\n"
@@ -608,19 +557,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_msg = (
         "❓ *Help*\n\n"
-        "*How to download:*\n"
+        "*How to use:*\n"
         "1. Copy link from supported platform\n"
         "2. Send link to this bot\n"
         "3. Wait for processing\n"
         "4. Receive downloaded file\n\n"
-        "*Common issues:*\n"
-        "• *Invalid link*: Send /guide for correct formats\n"
+        "*Troubleshooting:*\n"
+        "• *Invalid link*: Send /fbhelp for Facebook\n"
         "• *File too large*: Max 50MB\n"
-        "• *Private content*: Must be public\n"
-        "• *Login/redirect links*: Get direct link\n\n"
+        "• *Format error*: Try different video\n"
+        "• *Private content*: Must be public\n\n"
         "*Commands:*\n"
         "/start - Welcome message\n"
-        "/guide - Link format guide\n"
+        "/fbhelp - Facebook guide\n"
         "/examples - Example links\n"
         "/help - This message"
     )
@@ -632,7 +581,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    logger.info(f"Message from {user.id} ({user.username}): {text[:100]}...")
+    logger.info(f"Message from {user.id}: {text[:100]}...")
     
     # Validate URL
     validator = URLValidator()
@@ -653,7 +602,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Send initial message
     status_msg = await update.message.reply_text(
         f"⏳ *Processing {platform.upper()} link...*\n"
-        f"Platform: {platform}\n"
         f"Please wait...",
         parse_mode='Markdown'
     )
@@ -664,7 +612,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Update status
         await status_msg.edit_text(f"⬇️ *Downloading from {platform}...*", parse_mode='Markdown')
         
-        # Download file
+        # Download file with multiple format fallbacks
         downloaded_file = await download_with_ytdlp(url, platform, chat_dir)
         
         if not downloaded_file or not downloaded_file.exists():
@@ -701,11 +649,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         error_msg = f"❌ *Download Failed*\n\nPlatform: {platform}\nError: `{str(e)}`"
         
-        # Add platform-specific advice
-        if platform == 'facebook':
-            error_msg += "\n\n💡 *Facebook Tip:* Ensure you're using a direct video link, not a login/share link."
-        elif platform == 'tiktok':
-            error_msg += "\n\n💡 *TikTok Tip:* Video might be private or region-restricted."
+        # Special handling for format errors
+        if "format is not available" in str(e) or "Requested format" in str(e):
+            error_msg += "\n\n💡 *Tip:* This video might not have the requested format. Try a different video."
         
         await status_msg.edit_text(error_msg, parse_mode='Markdown')
         logger.error(f"Download failed for {url}: {e}")
@@ -717,29 +663,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 downloaded_file.unlink()
                 logger.info(f"Cleaned up: {downloaded_file}")
             except Exception as e:
-                logger.warning(f"Failed to cleanup {downloaded_file}: {e}")
+                logger.warning(f"Failed to cleanup: {e}")
 
 async def download_with_ytdlp(url: str, platform: str, output_path: Path) -> Path:
-    """Download using yt-dlp with platform-specific options"""
+    """Download using yt-dlp with multiple format fallbacks"""
     unique_id = uuid4().hex
     filename_template = f"{unique_id}.%(ext)s"
     output_template = str(output_path / filename_template)
     
     # Get platform-specific options
-    yt_dlp_options = bot_config.YT_DLP_OPTIONS['common'].copy()
-    
-    if platform in bot_config.YT_DLP_OPTIONS:
-        yt_dlp_options.extend(bot_config.YT_DLP_OPTIONS[platform])
-    else:
-        yt_dlp_options.extend(bot_config.YT_DLP_OPTIONS['default'])
+    yt_dlp_options = bot_config.get_ytdlp_options(platform)
     
     # Build command
     cmd = ["yt-dlp"] + yt_dlp_options + ["-o", output_template, url]
     
-    logger.info(f"Executing yt-dlp for {platform}")
+    logger.info(f"Downloading from {platform}: {url[:100]}...")
     
     try:
-        # Run yt-dlp
+        # First try: Use platform-specific format
+        logger.info(f"First attempt with format options")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -748,51 +690,78 @@ async def download_with_ytdlp(url: str, platform: str, output_path: Path) -> Pat
         
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=bot_config.DOWNLOAD_TIMEOUT)
         
-        if process.returncode != 0:
-            error_text = stderr.decode('utf-8', errors='ignore').strip()
+        if process.returncode == 0:
+            # Success - find downloaded file
+            return await find_downloaded_file(output_path, unique_id)
+        
+        # Check error
+        error_text = stderr.decode('utf-8', errors='ignore')
+        
+        # If format error, try with 'best' format
+        if "format is not available" in error_text or "Requested format" in error_text:
+            logger.info(f"Format error, trying 'best' format")
             
-            # Parse common errors
-            if "Unsupported URL" in error_text:
-                raise Exception("Link not supported or requires login.")
-            elif "Private video" in error_text or "Video unavailable" in error_text:
-                raise Exception("Video is private or unavailable.")
-            elif "Sign in" in error_text:
-                raise Exception("Content requires login. Try different public content.")
+            # Build new command with simple 'best' format
+            simple_cmd = [
+                "yt-dlp",
+                "--no-warnings",
+                "--no-progress",
+                "--restrict-filenames",
+                "--max-filesize", "50M",
+                "--format", "best",
+                "-o", output_template,
+                url
+            ]
+            
+            process2 = await asyncio.create_subprocess_exec(
+                *simple_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout2, stderr2 = await asyncio.wait_for(process2.communicate(), timeout=bot_config.DOWNLOAD_TIMEOUT)
+            
+            if process2.returncode == 0:
+                return await find_downloaded_file(output_path, unique_id)
             else:
-                # Get last meaningful error line
-                error_lines = [line.strip() for line in error_text.split('\n') if line.strip()]
-                last_error = error_lines[-1] if error_lines else "Unknown error"
-                raise Exception(f"Download error: {last_error}")
+                error_text2 = stderr2.decode('utf-8', errors='ignore')
+                raise Exception(f"Download failed: {error_text2.splitlines()[-1] if error_text2 else 'Unknown error'}")
         
-        # Find downloaded file
-        downloaded_file = None
+        # Other errors
+        error_lines = [line.strip() for line in error_text.split('\n') if line.strip()]
+        last_error = error_lines[-1] if error_lines else "Unknown error"
         
-        # Method 1: Search for file with unique ID
-        for file_path in output_path.glob(f"{unique_id}.*"):
-            if file_path.is_file() and file_path.stat().st_size > 0:
-                downloaded_file = file_path
-                break
-        
-        # Method 2: Look for newest file
-        if not downloaded_file:
-            files = list(output_path.glob("*"))
-            if files:
-                files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                newest_file = files[0]
-                # Check if file was created recently
-                file_age = datetime.now().timestamp() - newest_file.stat().st_mtime
-                if file_age < 300:  # Created in last 5 minutes
-                    downloaded_file = newest_file
-        
-        if not downloaded_file or not downloaded_file.exists():
-            raise FileNotFoundError("Downloaded file not found")
-        
-        return downloaded_file
-        
+        if "Private video" in error_text or "Video unavailable" in error_text:
+            raise Exception("Video is private or unavailable.")
+        elif "Sign in" in error_text:
+            raise Exception("Content requires login. Try different public content.")
+        elif "Unsupported URL" in error_text:
+            raise Exception("Link not supported or invalid.")
+        else:
+            raise Exception(f"Download error: {last_error}")
+            
     except asyncio.TimeoutError:
         raise Exception("Download timed out")
     except Exception as e:
         raise e
+
+async def find_downloaded_file(output_path: Path, unique_id: str) -> Path:
+    """Find downloaded file in directory"""
+    # Search for file with unique ID
+    for file_path in output_path.glob(f"{unique_id}.*"):
+        if file_path.is_file() and file_path.stat().st_size > 0:
+            return file_path
+    
+    # If not found, look for newest file
+    files = list(output_path.glob("*"))
+    if files:
+        files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        newest_file = files[0]
+        file_age = datetime.now().timestamp() - newest_file.stat().st_mtime
+        if file_age < 300:  # Created in last 5 minutes
+            return newest_file
+    
+    raise FileNotFoundError("Downloaded file not found")
 
 async def get_mime_type(file_path: Path) -> str:
     """Get MIME type of file"""
@@ -807,9 +776,9 @@ async def get_mime_type(file_path: Path) -> str:
         ext = file_path.suffix.lower()
         if ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv']:
             return 'video/mp4'
-        elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+        elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
             return 'image/jpeg'
-        elif ext in ['.mp3', '.m4a', '.wav', '.ogg']:
+        elif ext in ['.mp3', '.m4a', '.wav']:
             return 'audio/mpeg'
         else:
             return 'application/octet-stream'
@@ -818,7 +787,6 @@ async def send_file_to_telegram(update: Update, context: ContextTypes.DEFAULT_TY
                                file_path: Path, url: str, mime_type: str):
     """Send file to Telegram"""
     chat_id = update.effective_chat.id
-    file_size = file_path.stat().st_size
     
     try:
         with open(file_path, 'rb') as f:
@@ -826,36 +794,35 @@ async def send_file_to_telegram(update: Update, context: ContextTypes.DEFAULT_TY
                 await context.bot.send_video(
                     chat_id=chat_id,
                     video=f,
-                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    caption="✅ Downloaded successfully",
                     supports_streaming=True,
                     read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=120
+                    write_timeout=120
                 )
             elif mime_type.startswith('image'):
                 await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=f,
-                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    caption="✅ Downloaded successfully",
                     read_timeout=60
                 )
             elif mime_type.startswith('audio'):
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
-                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    caption="✅ Downloaded successfully",
                     read_timeout=60
                 )
             else:
                 await context.bot.send_document(
                     chat_id=chat_id,
                     document=f,
-                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    caption="✅ Downloaded successfully",
                     read_timeout=60
                 )
     except Exception as e:
         logger.error(f"Failed to send file: {e}")
-        raise Exception(f"Failed to upload to Telegram: {str(e)}")
+        raise Exception(f"Upload failed: {str(e)}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
@@ -872,7 +839,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function to run the bot"""
     if not bot_config.BOT_TOKEN:
-        logger.error("❌ BOT_TOKEN not found in .env file!")
+        logger.error("❌ BOT_TOKEN not found!")
         sys.exit(1)
     
     # Create application
@@ -886,7 +853,7 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("guide", guide_command))
+    application.add_handler(CommandHandler("fbhelp", fbhelp_command))
     application.add_handler(CommandHandler("examples", examples_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
@@ -902,8 +869,7 @@ def main():
     try:
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            close_loop=False
+            drop_pending_updates=True
         )
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
@@ -938,8 +904,8 @@ echo -e "${GREEN}🚀 Starting Telegram Downloader Bot...${NC}"
 
 # Check if already running
 if pgrep -f "python3.*bot.py" > /dev/null; then
-    echo -e "${YELLOW}⚠️ Bot is already running!${NC}"
-    echo -e "PID: $(pgrep -f "python3.*bot.py")"
+    PID=$(pgrep -f "python3.*bot.py")
+    echo -e "${YELLOW}⚠️ Bot is already running (PID: $PID)${NC}"
     echo -e "To restart: ${YELLOW}./restart_bot.sh${NC}"
     exit 0
 fi
@@ -951,30 +917,27 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Create directories
-mkdir -p downloads logs
-
-# Check Python
+# Check virtual environment
 if [ ! -f "venv/bin/activate" ]; then
     echo -e "${RED}❌ Virtual environment not found!${NC}"
-    echo -e "${YELLOW}Please run the installation script first.${NC}"
+    echo -e "${YELLOW}Please run the installation script again.${NC}"
     exit 1
 fi
 
+# Create directories
+mkdir -p downloads logs
+
 # Activate venv
 source venv/bin/activate
-
-# Update yt-dlp if possible
-echo -e "${YELLOW}🔧 Checking for updates...${NC}"
-python3 -m pip install --upgrade yt-dlp 2>/dev/null || true
 
 # Start bot
 echo -e "${GREEN}🤖 Starting bot...${NC}"
 echo -e "${YELLOW}📝 Logs: tail -f logs/bot.log${NC}"
 echo -e "${YELLOW}🛑 Press Ctrl+C to stop${NC}"
+echo ""
 
 # Run bot
-exec python3 bot.py
+python3 bot.py
 EOF
 
 # Stop script
@@ -1009,6 +972,7 @@ cat << 'EOF' > restart_bot.sh
 echo "🔄 Restarting bot..."
 ./stop_bot.sh
 sleep 3
+echo ""
 ./start_bot.sh
 EOF
 
@@ -1023,7 +987,9 @@ echo "============"
 if pgrep -f "python3.*bot.py" > /dev/null; then
     echo "✅ Status: RUNNING"
     echo "📊 PID: $(pgrep -f "python3.*bot.py")"
-    echo "⏰ Uptime: $(ps -p $(pgrep -f "python3.*bot.py") -o etime= 2>/dev/null || echo "Unknown")"
+    if command -v ps >/dev/null 2>&1; then
+        echo "⏰ Uptime: $(ps -p $(pgrep -f "python3.*bot.py") -o etime= 2>/dev/null || echo "Unknown")"
+    fi
 else
     echo "❌ Status: STOPPED"
 fi
@@ -1034,12 +1000,15 @@ if [ $YT_DLP_COUNT -gt 0 ]; then
     echo "📥 Active downloads: $YT_DLP_COUNT"
 fi
 
-# Check log file
+# Check directories
+echo "📁 Directories:"
+echo "  downloads/ - $(find downloads -type f 2>/dev/null | wc -l) files"
+echo "  logs/ - $(du -sh logs 2>/dev/null | cut -f1) size"
+
+# Check last log
 if [ -f "logs/bot.log" ]; then
-    LOG_SIZE=$(du -h logs/bot.log | cut -f1)
-    echo "📄 Log size: $LOG_SIZE"
-    echo "📋 Last activity:"
-    tail -3 logs/bot.log 2>/dev/null | while read line; do echo "  $line"; done
+    echo "📄 Last log entry:"
+    tail -1 logs/bot.log 2>/dev/null || echo "  No recent logs"
 fi
 
 echo "============"
@@ -1050,46 +1019,51 @@ cat << 'EOF' > view_logs.sh
 #!/bin/bash
 # View bot logs
 
-echo "📋 Bot Logs"
-echo "==========="
-
 if [ ! -f "logs/bot.log" ]; then
     echo "No log file found."
-    echo "Starting bot to create logs..."
-    ./start_bot.sh
-    exit 0
+    echo "Start the bot first: ./start_bot.sh"
+    exit 1
 fi
 
-echo "Showing last 50 lines. Press Ctrl+C to exit."
+echo "📋 Bot Logs (last 100 lines)"
+echo "============================="
 echo ""
-tail -50f logs/bot.log
+tail -100 logs/bot.log
+echo ""
+echo "============================="
+echo "For real-time logs, run: tail -f logs/bot.log"
 EOF
 
 # Make scripts executable
 chmod +x start_bot.sh stop_bot.sh restart_bot.sh status_bot.sh view_logs.sh
 
-# 9. Create a simple test script
-cat << 'EOF' > test_bot.py
+# 9. Create test script
+cat << 'EOF' > test_install.py
 #!/usr/bin/env python3
 """
-Simple test to verify bot installation
+Test bot installation
 """
-import sys
 import os
+import sys
 
-def test_installation():
-    print("🔧 Testing bot installation...")
+def test():
+    print("🔧 Testing Installation")
     print("=" * 40)
     
-    # Check Python
+    tests_passed = 0
+    total_tests = 0
+    
+    # Test 1: Python version
+    total_tests += 1
     try:
         import platform
-        print(f"✅ Python: {platform.python_version()}")
+        version = platform.python_version()
+        print(f"✅ Python {version}")
+        tests_passed += 1
     except:
         print("❌ Python not found")
-        return False
     
-    # Check packages
+    # Test 2: Required packages
     packages = [
         ("telegram", "python-telegram-bot"),
         ("dotenv", "python-dotenv"),
@@ -1098,96 +1072,115 @@ def test_installation():
     ]
     
     for import_name, package_name in packages:
+        total_tests += 1
         try:
             __import__(import_name)
             print(f"✅ {package_name}")
-        except ImportError as e:
-            print(f"❌ {package_name}: {str(e)}")
-            return False
+            tests_passed += 1
+        except ImportError:
+            print(f"❌ {package_name}")
     
-    # Check .env
+    # Test 3: .env file
+    total_tests += 1
     if os.path.exists(".env"):
-        print("✅ .env file exists")
         with open(".env", "r") as f:
             content = f.read()
-            if "BOT_TOKEN" in content:
-                print("✅ BOT_TOKEN found in .env")
+            if "BOT_TOKEN=" in content:
+                print("✅ .env file with BOT_TOKEN")
+                tests_passed += 1
             else:
-                print("⚠️ BOT_TOKEN not found in .env")
+                print("❌ .env missing BOT_TOKEN")
     else:
         print("❌ .env file not found")
-        return False
     
-    # Check directories
+    # Test 4: Directories
     directories = ["downloads", "logs", "venv"]
     for dir_name in directories:
+        total_tests += 1
         if os.path.exists(dir_name):
             print(f"✅ Directory: {dir_name}")
+            tests_passed += 1
         else:
-            print(f"❌ Directory missing: {dir_name}")
-            if dir_name == "venv":
-                return False
+            print(f"❌ Missing: {dir_name}")
+    
+    # Test 5: yt-dlp executable
+    total_tests += 1
+    try:
+        import subprocess
+        result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"✅ yt-dlp: {result.stdout.strip()}")
+            tests_passed += 1
+        else:
+            print("❌ yt-dlp not working")
+    except:
+        print("❌ yt-dlp test failed")
     
     print("=" * 40)
-    print("✅ All tests passed!")
-    print("\nTo start the bot:")
-    print("  ./start_bot.sh")
-    return True
+    print(f"Results: {tests_passed}/{total_tests} tests passed")
+    
+    if tests_passed == total_tests:
+        print("🎉 All tests passed! You can start the bot with: ./start_bot.sh")
+        return True
+    else:
+        print("⚠️ Some tests failed. Check the errors above.")
+        return False
 
 if __name__ == "__main__":
-    success = test_installation()
+    success = test()
     sys.exit(0 if success else 1)
 EOF
 
-chmod +x test_bot.py
+chmod +x test_install.py
 
 # 10. Create requirements.txt
 cat << 'EOF' > requirements.txt
-python-telegram-bot[job-queue]>=20.7
+python-telegram-bot[job-queue]>=20.0
 python-dotenv>=1.0.0
 yt-dlp>=2024.4.9
-requests>=2.31.0
-uuid>=1.30
+requests>=2.28.0
 EOF
 
 # 11. Final instructions
 echo -e "\n${GREEN}==================================================${NC}"
 echo -e "${GREEN}✅ Installation Complete!${NC}"
 echo -e "${GREEN}==================================================${NC}"
-echo -e "\n📁 ${YELLOW}Project Structure:${NC}"
+echo -e "\n📁 ${YELLOW}Files created:${NC}"
 ls -la
+
 echo -e "\n🚀 ${YELLOW}Quick Start:${NC}"
-echo -e "  ${GREEN}./start_bot.sh${NC}        # Start the bot"
-echo -e "  ${GREEN}./test_bot.py${NC}        # Test installation"
+echo -e "  ${GREEN}./test_install.py${NC}    # Test installation"
+echo -e "  ${GREEN}./start_bot.sh${NC}       # Start the bot"
 echo -e "\n⚙️ ${YELLOW}Management:${NC}"
 echo -e "  ${GREEN}./stop_bot.sh${NC}        # Stop bot"
 echo -e "  ${GREEN}./restart_bot.sh${NC}     # Restart bot"
 echo -e "  ${GREEN}./status_bot.sh${NC}      # Check status"
 echo -e "  ${GREEN}./view_logs.sh${NC}       # View logs"
-echo -e "\n📝 ${YELLOW}Testing:${NC}"
-echo -e "  1. Run: ${GREEN}./test_bot.py${NC}"
-echo -e "  2. Start: ${GREEN}./start_bot.sh${NC}"
-echo -e "  3. Send /start to your bot on Telegram"
+echo -e "\n📝 ${YELLOW}To test the bot:${NC}"
+echo -e "  1. Run: ${GREEN}./start_bot.sh${NC}"
+echo -e "  2. Send /start to your bot on Telegram"
+echo -e "  3. Send a Facebook link like:"
+echo -e "     ${BLUE}https://www.facebook.com/watch/?v=123456789${NC}"
 echo -e "\n${RED}⚠️ Important Notes:${NC}"
-echo -e "  • Bot only downloads PUBLIC content"
+echo -e "  • Facebook links must be DIRECT video links"
+echo -e "  • Avoid login/share redirect links"
 echo -e "  • Max file size: 50MB"
-echo -e "  • Avoid login/redirect links"
-echo -e "  • Use direct video links"
-echo -e "\n${GREEN}🤖 Bot is ready to use!${NC}"
+echo -e "  • Only public content"
+echo -e "\n${GREEN}🤖 Bot is ready!${NC}"
 echo -e "${GREEN}==================================================${NC}"
 
 # 12. Test installation
-echo -e "\n${YELLOW}🔧 Running installation test...${NC}"
+echo -e "\n${YELLOW}🔧 Testing installation...${NC}"
 source venv/bin/activate
-python3 test_bot.py
+python3 test_install.py
 
-# 13. Start bot option
-echo -e "\n${YELLOW}Do you want to start the bot now? (y/n)${NC}"
-read -r START_NOW
+# 13. Ask to start bot
+echo -e "\n${YELLOW}Start bot now? (y/n)${NC}"
+read -r START_CHOICE
 
-if [[ $START_NOW =~ ^[Yy]$ ]]; then
+if [[ "$START_CHOICE" =~ ^[Yy]$ ]]; then
     echo -e "${GREEN}Starting bot...${NC}"
     ./start_bot.sh
 else
-    echo -e "${YELLOW}To start later, run: ./start_bot.sh${NC}"
+    echo -e "${YELLOW}To start later: ./start_bot.sh${NC}"
 fi
