@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
 # Telegram Media Downloader Bot - Complete Installer
-# Works on fresh servers
+# Compatible with old pip versions
 # ============================================
 
 set -e  # Exit on error
@@ -63,14 +63,45 @@ apt-get install -y \
     jq
 
 # ============================================
-# STEP 2: Install Python and Core Dependencies
+# STEP 2: Check and Install Python/Pip
 # ============================================
-print_status "Installing Python and pip..."
-apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev
+print_status "Checking Python installation..."
+
+# Check Python version
+if ! command -v python3 &> /dev/null; then
+    print_status "Python3 not found. Installing..."
+    apt-get install -y python3
+fi
+
+# Check pip version
+if ! command -v pip3 &> /dev/null; then
+    print_status "pip3 not found. Installing..."
+    apt-get install -y python3-pip
+fi
+
+# Get Python version
+PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+
+print_status "Found Python $PYTHON_VERSION"
+
+# Check if Python >= 3.7
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 7 ]); then
+    print_error "Python 3.7 or higher is required. Found $PYTHON_VERSION"
+    print_status "Attempting to install Python 3.9..."
+    
+    # Try to install Python 3.9
+    apt-get install -y software-properties-common
+    add-apt-repository -y ppa:deadsnakes/ppa
+    apt-get update
+    apt-get install -y python3.9 python3.9-distutils
+    
+    # Update alternatives
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
+    
+    print_status "Python 3.9 installed successfully"
+fi
 
 # Install ffmpeg for video processing
 print_status "Installing ffmpeg..."
@@ -99,36 +130,43 @@ mkdir -p downloads logs cookies tmp config
 chmod 755 downloads logs cookies tmp config
 
 # ============================================
-# STEP 4: Install Python Packages (Optimized)
+# STEP 4: Install Python Packages (Compatibile)
 # ============================================
 print_status "Installing Python packages..."
 
-# First upgrade pip with root action to suppress warnings
-pip3 install --upgrade pip --root-user-action=ignore
+# First upgrade pip (without --root-user-action)
+print_status "Upgrading pip..."
+python3 -m pip install --upgrade pip --quiet
 
 # Install core packages first
 print_status "Installing core dependencies..."
-for package in \
-    "python-telegram-bot==20.7" \
-    "python-dotenv==1.0.0" \
-    "aiofiles==23.2.1" \
-    "psutil==5.9.8" \
-    "requests==2.31.0" \
-    "beautifulsoup4==4.12.3" \
-    "lxml==4.9.4" \
-    "pillow==10.2.0"
-do
-    print_info "Installing: $package"
-    pip3 install "$package" --root-user-action=ignore || print_warning "Continuing despite $package install issue"
-done
 
-# Install yt-dlp with specific version to avoid conflicts
-print_status "Installing yt-dlp with all extractors..."
-pip3 install "yt-dlp==2024.4.9" --root-user-action=ignore
+# Create a requirements file for easier installation
+cat > requirements.txt << 'EOF'
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+aiofiles==23.2.1
+psutil==5.9.8
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==4.9.4
+pillow==10.2.0
+yt-dlp==2024.4.9
+brotli==1.1.0
+urllib3==2.1.0
+EOF
 
-# Install additional useful packages
-print_status "Installing helper packages..."
-pip3 install brotli urllib3 --root-user-action=ignore
+# Install from requirements file
+print_status "Installing from requirements.txt..."
+python3 -m pip install -r requirements.txt --quiet
+
+# Verify installations
+print_status "Verifying installations..."
+if python3 -c "import telegram, yt_dlp, dotenv" 2>/dev/null; then
+    print_status "✅ Core packages installed successfully"
+else
+    print_warning "⚠️ Some packages may not have installed correctly"
+fi
 
 # ============================================
 # STEP 5: Create Configuration Files
@@ -189,7 +227,6 @@ cat > config/yt-dlp-config.conf << 'EOF'
 # Platform specific settings
 --extractor-args "youtube:player-client=android,web"
 --extractor-args "reddit:user-agent=Mozilla/5.0"
---extractor-args "pinterest:skip_auth_warning=true"
 EOF
 
 # ============================================
@@ -209,7 +246,6 @@ import sys
 import logging
 import subprocess
 import asyncio
-import json
 import re
 from pathlib import Path
 from datetime import datetime
@@ -248,71 +284,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Site-specific configurations
-SITE_CONFIGS = {
-    # Working sites - simple configurations
-    "streamable.com": {
-        "format": "best",
-        "args": ["--referer", "https://streamable.com/"]
-    },
-    "dai.ly": {
-        "format": "best[height<=720]",
-        "args": []
-    },
-    "twitch.tv": {
-        "format": "best",
-        "args": ["--add-header", "Client-ID:kimne78kx3ncx6brgo4mv6wki5h1ko"]
-    },
-    
-    # Sites needing cookies
-    "pinterest.com": {
-        "format": "best",
-        "args": ["--referer", "https://www.pinterest.com/"],
-        "needs_cookies": True
-    },
-    "pin.it": {
-        "format": "best",
-        "args": ["--referer", "https://www.pinterest.com/"],
-        "needs_cookies": True
-    },
-    "reddit.com": {
-        "format": "best[height<=720]",
-        "args": ["--user-agent", "Mozilla/5.0"],
-        "needs_cookies": True
-    },
-    
-    # Sites needing special handling
-    "vimeo.com": {
-        "format": "best[height<=1080]",
-        "args": ["--user-agent", "Mozilla/5.0"]
-    },
-    "rumble.com": {
-        "format": "best",
-        "args": ["--user-agent", "Mozilla/5.0"]
-    },
-    "bilibili.com": {
-        "format": "best[height<=720]",
-        "args": ["--referer", "https://www.bilibili.com/"]
-    },
-    "ted.com": {
-        "format": "best[height<=720]",
-        "args": []
-    }
-}
-
-def get_site_config(url):
-    """Get configuration for specific site"""
-    for domain, config in SITE_CONFIGS.items():
-        if domain in url.lower():
-            return config
-    
-    # Default configuration for unknown sites
-    return {
-        "format": "best[height<=720]",
-        "args": [],
-        "needs_cookies": False
-    }
 
 def clean_url(text):
     """Extract and clean URL from text"""
@@ -353,66 +324,46 @@ def format_size(bytes_val):
     except:
         return "Unknown"
 
-async def download_with_retry(url, output_path, max_retries=3):
-    """Download with multiple retry strategies"""
+async def download_video(url, output_path, retry_count=0):
+    """Download video with multiple fallback methods"""
     
-    config = get_site_config(url)
-    cookies_file = "cookies/cookies.txt"
-    
-    # Method 1: Standard download
-    retry_methods = [
-        # Method 1: Standard with cookies if needed
-        lambda: download_method(url, output_path, config, cookies_file),
+    methods = [
+        # Method 1: Standard download
+        lambda: standard_download(url, output_path),
         
         # Method 2: Simple best format
-        lambda: download_simple(url, output_path),
+        lambda: simple_download(url, output_path),
         
-        # Method 3: Audio only (fallback)
-        lambda: download_audio_only(url, output_path),
+        # Method 3: Audio only fallback
+        lambda: audio_download(url, output_path),
     ]
     
-    for retry in range(max_retries):
-        method = retry_methods[min(retry, len(retry_methods) - 1)]
-        
-        logger.info(f"Download attempt {retry + 1} for {url[:50]}")
-        success, result = await method()
-        
-        if success:
-            return True, result
-        
-        if retry < max_retries - 1:
-            logger.warning(f"Attempt {retry + 1} failed: {result[:100]}")
-            await asyncio.sleep(2)  # Wait before retry
+    # Use appropriate method based on retry count
+    method_index = min(retry_count, len(methods) - 1)
+    success, result = await methods[method_index]()
     
-    return False, "All download attempts failed"
+    return success, result
 
-async def download_method(url, output_path, config, cookies_file):
-    """Specific download method"""
+async def standard_download(url, output_path):
+    """Standard download with config"""
     try:
-        # Build command
         cmd = [
             "yt-dlp",
-            "-f", config["format"],
+            "-f", "best[height<=720]",
             "-o", output_path,
             "--no-warnings",
             "--ignore-errors",
             "--no-playlist",
-            "--config-location", "config/yt-dlp-config.conf"
+            "--config-location", "config/yt-dlp-config.conf",
+            url
         ]
         
-        # Add site-specific arguments
-        cmd.extend(config.get("args", []))
-        
-        # Add cookies if available and needed
-        if config.get("needs_cookies", False) and os.path.exists(cookies_file):
+        # Add cookies if available
+        cookies_file = "cookies/cookies.txt"
+        if os.path.exists(cookies_file):
             cmd.extend(["--cookies", cookies_file])
-            logger.info("Using cookies file for download")
         
-        # Add URL
-        cmd.append(url)
-        
-        # Run download
-        logger.info(f"Running command: {' '.join(cmd[:10])}...")
+        logger.info(f"Running: {' '.join(cmd[:8])}...")
         
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -420,7 +371,6 @@ async def download_method(url, output_path, config, cookies_file):
             stderr=subprocess.PIPE
         )
         
-        # Wait with timeout
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
         except asyncio.TimeoutError:
@@ -431,12 +381,12 @@ async def download_method(url, output_path, config, cookies_file):
             return True, "Download successful"
         else:
             error = stderr.decode('utf-8', errors='ignore')[:200]
-            return False, f"yt-dlp error: {error}"
+            return False, f"Error: {error}"
             
     except Exception as e:
         return False, f"Command error: {str(e)}"
 
-async def download_simple(url, output_path):
+async def simple_download(url, output_path):
     """Simple fallback download"""
     try:
         cmd = [
@@ -461,12 +411,12 @@ async def download_simple(url, output_path):
             return True, "Simple download successful"
         else:
             error = stderr.decode('utf-8', errors='ignore')[:200]
-            return False, f"Simple download error: {error}"
+            return False, f"Error: {error}"
             
     except Exception as e:
-        return False, f"Simple download error: {str(e)}"
+        return False, f"Error: {str(e)}"
 
-async def download_audio_only(url, output_path):
+async def audio_download(url, output_path):
     """Audio only fallback"""
     try:
         cmd = [
@@ -491,17 +441,17 @@ async def download_audio_only(url, output_path):
             return True, "Audio download successful"
         else:
             error = stderr.decode('utf-8', errors='ignore')[:200]
-            return False, f"Audio download error: {error}"
+            return False, f"Error: {error}"
             
     except Exception as e:
-        return False, f"Audio download error: {str(e)}"
+        return False, f"Error: {str(e)}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = """
 🤖 *Telegram Media Downloader Bot*
 
-✅ *WORKING SITES:*
+✅ *CONFIRMED WORKING SITES:*
 • Streamable (streamable.com) - ✅
 • Dailymotion (dai.ly) - ✅  
 • Twitch clips - ✅
@@ -509,25 +459,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚠️ *SITES NEEDING COOKIES:*
 • Pinterest (pin.it) - 🍪 Required
 • Reddit - 🍪 Recommended
-• Others may need cookies.txt file
-
-🔧 *SITES WITH LIMITATIONS:*
-• Vimeo, Rumble, Bilibili, TED
-• May work with proper configuration
 
 📝 *HOW TO USE:*
 1. Send a media URL
-2. Bot will try multiple methods
+2. Bot tries 3 different methods
 3. Receive downloaded file
 
 ⚡ *BOT FEATURES:*
 • Multiple retry methods
 • Auto fallback strategies
-• File size limits
+• File size limits (2000MB max)
 • Cleanup after 2 minutes
 
 🍪 *COOKIES SETUP:*
-For better results, add cookies.txt to:
+For Pinterest/Reddit, add cookies.txt to:
 /opt/telegram-media-bot/cookies/
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
@@ -553,7 +498,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔗 *Processing URL*\n\n"
         f"Site: *{site}*\n"
         f"URL: `{url[:50]}...`\n\n"
-        f"Starting download process...",
+        f"Starting download...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -563,30 +508,52 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filename = f"{safe_name}_{timestamp}"
     output_template = f"downloads/{filename}.%(ext)s"
     
-    # Try download
-    await msg.edit_text(
-        f"📥 *Downloading...*\n\n"
-        f"Site: {site}\n"
-        f"Attempt 1/3\n\n"
-        f"Please wait...",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    success, result = await download_with_retry(url, output_template, max_retries=3)
-    
-    if not success:
+    # Try download with 3 retries
+    max_retries = 3
+    for retry in range(max_retries):
         await msg.edit_text(
-            f"❌ *All download attempts failed*\n\n"
+            f"📥 *Downloading...*\n\n"
             f"Site: {site}\n"
-            f"URL: `{url[:50]}...`\n\n"
-            f"*Error:* {result}\n\n"
-            f"*Possible solutions:*\n"
-            f"• Check if URL is accessible\n"
-            f"• Add cookies for this site\n"
-            f"• Try a different URL\n"
-            f"• Some sites block automated downloads",
+            f"Attempt {retry + 1}/{max_retries}\n\n"
+            f"Please wait...",
             parse_mode=ParseMode.MARKDOWN
         )
+        
+        success, result = await download_video(url, output_template, retry)
+        
+        if success:
+            await msg.edit_text(
+                f"✅ *Download Successful!*\n\n"
+                f"Site: {site}\n"
+                f"Processing file...",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            break
+        else:
+            if retry < max_retries - 1:
+                await msg.edit_text(
+                    f"⚠️ *Retrying...*\n\n"
+                    f"Site: {site}\n"
+                    f"Attempt {retry + 1} failed\n\n"
+                    f"Trying different method...",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await asyncio.sleep(2)
+            else:
+                await msg.edit_text(
+                    f"❌ *All download attempts failed*\n\n"
+                    f"Site: {site}\n"
+                    f"URL: `{url[:50]}...`\n\n"
+                    f"*Error:* {result}\n\n"
+                    f"*Possible solutions:*\n"
+                    f"• Check if URL is accessible\n"
+                    f"• Add cookies for this site\n"
+                    f"• Try a different URL",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+    
+    if not success:
         return
     
     # Find downloaded file
@@ -689,7 +656,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📋 *How to use:*
 1. Send any media URL
-2. Bot tries multiple download methods
+2. Bot tries 3 different download methods
 3. Receive file in Telegram
 
 ✅ *Confirmed working sites:*
@@ -700,7 +667,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚠️ *Sites needing cookies:*
 • Pinterest (pinterest.com, pin.it)
 • Reddit (reddit.com)
-• For these, add cookies.txt file
 
 🔧 *Cookies setup:*
 1. Install "Get cookies.txt" browser extension
@@ -711,12 +677,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📏 *Limits:*
 • Max file size: 2000MB
 • Auto-delete: 2 minutes
-• Concurrent downloads: 1
 
 🐛 *Troubleshooting:*
 • Check logs: tail -f logs/bot.log
 • Update yt-dlp: pip3 install --upgrade yt-dlp
-• Check .env configuration
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -726,7 +690,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     cpu = psutil.cpu_percent()
     memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
     
     status_text = f"""
 📊 *BOT STATUS REPORT*
@@ -735,19 +698,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • CPU Usage: {cpu:.1f}%
 • Memory Usage: {memory.percent:.1f}%
 • Free Memory: {format_size(memory.available)}
-• Disk Free: {format_size(disk.free)}
 
 🤖 *Bot Configuration:*
 • Version: Complete Installer v1.0
 • Max File Size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} minutes
-• Weak Mode: {'✅ Enabled' if WEAK_MODE else '❌ Disabled'}
 
 📁 *Directories:*
 • Main: /opt/telegram-media-bot/
 • Downloads: /opt/telegram-media-bot/downloads/
 • Logs: /opt/telegram-media-bot/logs/
-• Cookies: /opt/telegram-media-bot/cookies/
 
 💡 *Quick Commands:*
 /start - Welcome message
@@ -762,7 +722,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         await update.effective_message.reply_text(
-            f"❌ *Bot Error*\n\nAn error occurred: `{str(context.error)[:200]}`\n\nCheck bot logs for details.",
+            f"❌ *Bot Error*\n\nAn error occurred.\n\nCheck bot logs for details.",
             parse_mode=ParseMode.MARKDOWN
         )
     except:
@@ -773,7 +733,7 @@ def main():
     print("=" * 60)
     print("🤖 Telegram Media Downloader Bot - Complete Installer")
     print("=" * 60)
-    print(f"📁 Install directory: {INSTALL_DIR}")
+    print(f"📁 Install directory: /opt/telegram-media-bot")
     print(f"🤖 Bot token: {BOT_TOKEN[:20]}...")
     print(f"📏 Max file size: {MAX_SIZE_MB}MB")
     print(f"⏰ Auto-delete: {DELETE_AFTER} minutes")
@@ -827,10 +787,6 @@ StandardOutput=append:/opt/telegram-media-bot/logs/bot.log
 StandardError=append:/opt/telegram-media-bot/logs/bot-error.log
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=PYTHONUNBUFFERED=1
-
-# Resource limits for weak servers
-MemoryLimit=512M
-CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
@@ -886,11 +842,11 @@ cat > update-bot.sh << 'EOF'
 echo "Updating bot components..."
 cd /opt/telegram-media-bot
 
-# Update yt-dlp
-pip3 install --upgrade yt-dlp --root-user-action=ignore
+# Update pip first
+python3 -m pip install --upgrade pip --quiet
 
-# Update python-telegram-bot
-pip3 install --upgrade python-telegram-bot --root-user-action=ignore
+# Update packages
+python3 -m pip install --upgrade yt-dlp python-telegram-bot --quiet
 
 # Restart bot
 systemctl restart telegram-media-bot.service
@@ -901,33 +857,68 @@ EOF
 chmod +x *.sh
 
 # ============================================
-# STEP 9: Create Cookies Instructions
+# STEP 9: Final Setup
 # ============================================
-cat > COOKIES_INSTRUCTIONS.md << 'EOF'
-# 🍪 How to Setup Cookies for Better Downloads
+print_status "Setting final permissions..."
+chown -R root:root /opt/telegram-media-bot
+chmod 644 /opt/telegram-media-bot/.env
 
-## Why Cookies?
-Some websites require cookies to:
-- Access private/age-restricted content
-- Bypass rate limits  
-- Maintain login sessions
+print_status "Starting bot service..."
+systemctl start telegram-media-bot.service
 
-## Step-by-Step Guide:
+# Wait for service to start
+sleep 3
 
-### 1. Install Browser Extension
-- Chrome: Install "Get cookies.txt" extension
-- Firefox: Install "cookies.txt" extension
+# ============================================
+# STEP 10: Verify Installation
+# ============================================
+if systemctl is-active --quiet telegram-media-bot.service; then
+    print_status "✅ Bot service is running successfully!"
+    SERVICE_STATUS="✅ RUNNING"
+else
+    print_warning "⚠️ Service is not running"
+    SERVICE_STATUS="❌ NOT RUNNING"
+    print_info "Starting service manually..."
+    systemctl start telegram-media-bot.service
+    sleep 2
+fi
 
-### 2. Get Cookies for a Site
-1. Open the website (e.g., pinterest.com)
-2. Login to your account (if needed)
-3. Click the extension icon
-4. Click "Export" or "Save as cookies.txt"
-
-### 3. Upload to Server
-```bash
-# On your local computer (Linux/Mac)
-scp cookies.txt root@your-server-ip:/opt/telegram-media-bot/cookies/
-
-# Or upload via SFTP to:
-# /opt/telegram-media-bot/cookies/cookies.txt
+# ============================================
+# FINAL INSTRUCTIONS
+# ============================================
+echo ""
+echo "==============================================="
+echo "🎉 INSTALLATION COMPLETE"
+echo "==============================================="
+echo ""
+echo "📋 QUICK START GUIDE:"
+echo "1. Go to Telegram and find your bot"
+echo "2. Send /start command"
+echo "3. Test with these confirmed URLs:"
+echo "   • https://streamable.com/2ipg1n"
+echo "   • https://dai.ly/x7rx1hr"
+echo "   • Twitch clips"
+echo ""
+echo "⚙️ SERVICE STATUS: $SERVICE_STATUS"
+echo ""
+echo "🔧 MANAGEMENT COMMANDS:"
+echo "cd /opt/telegram-media-bot"
+echo "./start-bot.sh    # Start manually"
+echo "./stop-bot.sh     # Stop bot"
+echo "./restart-bot.sh  # Restart bot"
+echo "./bot-status.sh   # Check status"
+echo "./bot-logs.sh     # View logs"
+echo ""
+echo "🐛 TROUBLESHOOTING:"
+echo "• Check logs: tail -f logs/bot.log"
+echo "• Check service: systemctl status telegram-media-bot"
+echo "• Test Python: python3 --version"
+echo "• Test pip: pip3 --version"
+echo ""
+echo "🍪 FOR PINTEREST/REDDIT:"
+echo "• You need cookies.txt in /opt/telegram-media-bot/cookies/"
+echo "• Use browser extension to export cookies"
+echo ""
+echo "📞 NEED HELP?"
+echo "Check logs: tail -f /opt/telegram-media-bot/logs/bot.log"
+echo "==============================================="
