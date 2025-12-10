@@ -1,50 +1,77 @@
-# 1. اول وابستگی‌های سیستم را نصب کنید
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv curl ffmpeg git
+#!/bin/bash
 
-# 2. yt-dlp را نصب کنید
+# =========================================================
+#   Telegram Video Downloader Bot - Complete Installer
+# =========================================================
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${GREEN}🤖 Telegram Video Downloader Bot Installer${NC}"
+echo -e "${YELLOW}==========================================${NC}"
+
+# 1. Install system dependencies
+echo -e "${YELLOW}📦 Installing system dependencies...${NC}"
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv curl ffmpeg
+
+# 2. Install yt-dlp
+echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
+echo -e "${GREEN}✅ yt-dlp installed${NC}"
 
-# 3. دایرکتوری پروژه را ایجاد کنید
-mkdir -p telegram-downloader-bot
-cd telegram-downloader-bot
+# 3. Create project directory
+echo -e "${YELLOW}📁 Creating project structure...${NC}"
+mkdir -p telegram-video-bot
+cd telegram-video-bot
 mkdir -p downloads logs cookies
 
-# 4. محیط مجازی پایتون ایجاد کنید
+# 4. Create Python virtual environment
+echo -e "${YELLOW}🐍 Setting up Python environment...${NC}"
 python3 -m venv venv
 source venv/bin/activate
 
-# 5. کتابخانه‌های پایتون را نصب کنید
+# 5. Install Python packages
 pip install --upgrade pip
 pip install python-telegram-bot==20.7 python-dotenv==1.0.0
 
-# 6. توکن ربات را دریافت کنید
-echo "🤖 Telegram Bot Token Configuration"
-read -p "Enter your Telegram Bot Token (from @BotFather): " BOT_TOKEN
+# 6. Get Bot Token
+echo -e "${GREEN}🔑 Bot Token Configuration${NC}"
+echo -e "${YELLOW}Enter your Telegram Bot Token (from @BotFather):${NC}"
+read -r BOT_TOKEN
 
-if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z09_-]+$ ]]; then
-    echo "❌ Invalid token! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ"
+# Validate token format
+if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
+    echo -e "${RED}❌ Invalid token format!${NC}"
+    echo -e "${RED}Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ${NC}"
     exit 1
 fi
 
 echo "BOT_TOKEN=$BOT_TOKEN" > .env
-echo "✅ Token saved to .env file"
+echo -e "${GREEN}✅ Token saved to .env file${NC}"
 
-# 7. فایل bot.py را ایجاد کنید
-cat > bot.py << 'EOF'
+# 7. Create bot.py file
+echo -e "${YELLOW}📝 Creating bot.py...${NC}"
+
+cat > bot.py << 'BOT_EOF'
 #!/usr/bin/env python3
 """
-Enhanced Telegram Downloader Bot with Quality Selection
+Telegram Video Downloader Bot with Quality Selection
+Supports: TikTok, Facebook, YouTube, Instagram, Twitter/X, Reddit, Pinterest, Likee, Twitch, Dailymotion, Streamable, Vimeo, Rumble, Bilibili, TED, Aparat, Namava, Filimo, Tiva
 """
+
 import os
 import sys
 import logging
 import subprocess
 import asyncio
 import json
-import re
-import math
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
@@ -65,17 +92,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Enhanced supported platforms
+# Supported platforms
 SUPPORTED_DOMAINS = [
-    # Main platforms
     "tiktok.com", "douyin.com",
     "facebook.com", "fb.watch",
     "youtube.com", "youtu.be",
     "instagram.com",
     "twitter.com", "x.com",
     "reddit.com",
-    
-    # Additional platforms
     "pinterest.com", "pin.it",
     "likee.video", "likee.com",
     "twitch.tv",
@@ -85,15 +109,13 @@ SUPPORTED_DOMAINS = [
     "rumble.com",
     "bilibili.com",
     "ted.com",
-    
-    # Iranian platforms
     "aparat.com",
     "namava.ir",
     "filimo.com",
     "tiva.ir"
 ]
 
-# Platform names mapping
+# Platform names
 PLATFORM_NAMES = {
     "tiktok": "TikTok",
     "facebook": "Facebook",
@@ -116,11 +138,11 @@ PLATFORM_NAMES = {
     "tiva": "Tiva"
 }
 
-# User download sessions
+# User sessions storage
 user_sessions = {}
 
 class DownloadSession:
-    """Store user download session data"""
+    """Store user session data"""
     def __init__(self, url, platform, formats):
         self.url = url
         self.platform = platform
@@ -131,35 +153,29 @@ class DownloadSession:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
     welcome_msg = """
-🤖 *Enhanced Downloader Bot*
+🤖 *Video Downloader Bot*
 
 📥 *Supported Platforms:*
-• TikTok, Douyin
-• Facebook, Instagram
-• YouTube, Twitter/X
-• Reddit, Pinterest
-• Likee, Twitch
-• Dailymotion, Streamable
-• Vimeo, Rumble
-• Bilibili, TED
+• TikTok, Facebook, YouTube
+• Instagram, Twitter/X, Reddit
+• Pinterest, Likee, Twitch
+• Dailymotion, Streamable, Vimeo
+• Rumble, Bilibili, TED
 
 🇮🇷 *Iranian Platforms:*
-• Aparat, Namava
-• Filimo, Tiva
+• Aparat, Namava, Filimo, Tiva
 
 ✨ *Features:*
-✅ Quality selection before download
-✅ File size display for each quality
+✅ Choose quality before download
+✅ See file size for each quality
 ✅ Video information included
-✅ Supports 50MB max file size
-✅ Public videos only
+✅ Max 50MB file size
+✅ Public videos supported
 
 📝 *How to use:*
 1. Send me a video link
-2. Choose your preferred quality
-3. Wait for download
-
-⚠️ *Note:* Some platforms may require login cookies for better quality.
+2. Select your preferred quality
+3. Wait for download to complete
 """
     await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN)
 
@@ -171,54 +187,27 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📋 *Steps:*
 1. Copy video URL
 2. Send to bot
-3. Select quality from list
+3. Choose quality from list
 4. Get downloaded file
 
 🎛️ *Quality Selection:*
-- You'll see all available qualities
-- Each option shows resolution and file size
+- All available qualities shown
+- Each option shows resolution & size
 - Choose based on your needs
 
-📊 *Information Displayed:*
-• Video title and uploader
+📊 *Video Info Displayed:*
+• Title and uploader
 • Duration and views
-• Likes count and platform
-• Original URL and file size
+• Likes count
+• Platform and quality
+• File size
 
-🔧 *Tips:*
-• For Facebook/Twitter: Try direct links
-• Max file size: 50MB
-• Some platforms may have limited qualities
-• Use /cookies command to add login cookies
+⚠️ *Limits:*
+• Max 50MB per file
+• Public videos only
+• Some platforms may need cookies
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-
-async def cookies_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guide for adding cookies"""
-    cookies_guide = """
-🍪 *Cookies Guide*
-
-Some platforms require login cookies for:
-• Access to private videos
-• Higher quality options
-• Age-restricted content
-
-📁 *Cookie File Location:*
-`cookies/` directory
-
-🎯 *Supported Platforms:*
-• YouTube, Facebook
-• Instagram, Twitter
-• Reddit, Twitch
-
-⚠️ *Important:*
-1. Use browser extensions to export cookies
-2. Save as `cookies.txt` in cookies folder
-3. Restart bot after adding cookies
-
-🔒 *Privacy:* Your cookies are stored locally only.
-"""
-    await update.message.reply_text(cookies_guide, parse_mode=ParseMode.MARKDOWN)
 
 def is_supported(url):
     """Check if URL is supported"""
@@ -229,7 +218,7 @@ def is_supported(url):
     return False
 
 def format_file_size(size_bytes):
-    """Format file size in human readable format"""
+    """Format file size"""
     if size_bytes == 0 or size_bytes is None:
         return "Unknown"
     
@@ -283,9 +272,9 @@ def detect_platform(url):
     return "unknown"
 
 async def get_available_formats(url):
-    """Get available formats with size information"""
+    """Get available formats with size info"""
     try:
-        # Check cookies
+        # Check for cookies
         cookies_path = "cookies/cookies.txt"
         cookies_args = []
         if os.path.exists(cookies_path):
@@ -299,7 +288,6 @@ async def get_available_formats(url):
             url
         ]
         
-        logger.info(f"Getting formats with command: {' '.join(cmd)}")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -309,18 +297,14 @@ async def get_available_formats(url):
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
         if process.returncode != 0:
-            logger.error(f"Format list error: {stderr.decode('utf-8', errors='ignore')[:200]}")
-            return None
+            return await get_basic_formats(url)
         
         output = stdout.decode('utf-8', errors='ignore')
-        
-        # Parse formats
         formats = []
         lines = output.split('\n')
         
         for line in lines:
-            # Look for format lines (they contain resolution, filesize, etc.)
-            if 'mp4' in line.lower() or 'webm' in line.lower() or 'm4a' in line.lower():
+            if 'mp4' in line.lower() or 'webm' in line.lower():
                 parts = line.split()
                 if len(parts) >= 7:
                     try:
@@ -328,11 +312,10 @@ async def get_available_formats(url):
                         extension = parts[1]
                         resolution = parts[2] if len(parts) > 2 else "N/A"
                         
-                        # Extract filesize
+                        # Find filesize
                         filesize = None
                         for i, part in enumerate(parts):
                             if 'MiB' in part or 'KiB' in part:
-                                # Convert to bytes
                                 size_str = parts[i-1]
                                 unit = parts[i]
                                 try:
@@ -340,13 +323,10 @@ async def get_available_formats(url):
                                         filesize = float(size_str) * 1024 * 1024
                                     elif 'KiB' in unit:
                                         filesize = float(size_str) * 1024
-                                    elif 'GiB' in unit:
-                                        filesize = float(size_str) * 1024 * 1024 * 1024
                                 except:
                                     filesize = None
                                 break
                         
-                        # Only add video formats under 50MB
                         if filesize and filesize <= 50 * 1024 * 1024:
                             formats.append({
                                 'id': format_id,
@@ -355,28 +335,20 @@ async def get_available_formats(url):
                                 'filesize': filesize,
                                 'filesize_str': format_file_size(filesize)
                             })
-                    except Exception as e:
-                        logger.warning(f"Error parsing format line: {e}")
+                    except:
                         continue
         
-        # If no formats found with size, try to get basic formats
         if not formats:
             return await get_basic_formats(url)
         
-        # Sort by filesize (largest first)
         formats.sort(key=lambda x: x.get('filesize', 0), reverse=True)
-        
         return formats
         
-    except asyncio.TimeoutError:
-        logger.warning("Timeout getting formats")
-        return None
-    except Exception as e:
-        logger.error(f"Error getting formats: {e}")
+    except:
         return await get_basic_formats(url)
 
 async def get_basic_formats(url):
-    """Get basic formats when detailed parsing fails"""
+    """Get basic formats fallback"""
     try:
         cmd = [
             "yt-dlp",
@@ -397,30 +369,26 @@ async def get_basic_formats(url):
         if process.returncode == 0:
             data = json.loads(stdout.decode('utf-8', errors='ignore'))
             
-            # Create basic format options
             formats = []
-            best_format = {
+            formats.append({
                 'id': 'best',
                 'ext': 'mp4',
-                'resolution': 'Best',
-                'filesize': data.get('filesize_approx') or data.get('filesize'),
-                'filesize_str': format_file_size(data.get('filesize_approx') or data.get('filesize'))
-            }
-            formats.append(best_format)
+                'resolution': 'Best Quality',
+                'filesize': data.get('filesize_approx'),
+                'filesize_str': format_file_size(data.get('filesize_approx'))
+            })
             
-            worst_format = {
+            formats.append({
                 'id': 'worst',
                 'ext': 'mp4',
-                'resolution': 'Worst',
+                'resolution': 'Low Quality',
                 'filesize': None,
                 'filesize_str': 'Unknown'
-            }
-            formats.append(worst_format)
+            })
             
             return formats
-            
-    except Exception as e:
-        logger.error(f"Error getting basic formats: {e}")
+    except:
+        pass
     
     return None
 
@@ -451,29 +419,22 @@ async def get_video_info(url):
         
         if process.returncode == 0:
             return json.loads(stdout.decode('utf-8', errors='ignore'))
-        else:
-            logger.warning(f"Could not get video info: {stderr.decode('utf-8', errors='ignore')[:100]}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error getting video info: {e}")
-        return None
+    except:
+        pass
+    
+    return None
 
-def create_video_caption(video_info, platform, url, selected_format=None):
-    """Create video caption with information"""
+def create_caption(video_info, platform, url, selected_format=None):
+    """Create video caption"""
     platform_name = PLATFORM_NAMES.get(platform, platform.capitalize())
     
     if not video_info:
-        caption = f"📹 Downloaded from {platform_name}\n"
-        caption += f"🔗 {url[:100]}..."
-        return caption
+        return f"📹 Downloaded from {platform_name}\n🔗 {url[:100]}..."
     
     try:
-        # Extract information
-        title = video_info.get('title', 'Unknown Title')
-        uploader = video_info.get('uploader', 'Unknown Uploader')
+        title = video_info.get('title', 'Unknown Title')[:100]
+        uploader = video_info.get('uploader', 'Unknown Uploader')[:50]
         
-        # Duration
         duration = video_info.get('duration', 0)
         if duration:
             minutes = int(duration // 60)
@@ -482,39 +443,22 @@ def create_video_caption(video_info, platform, url, selected_format=None):
         else:
             duration_str = "Unknown"
         
-        # Stats
         view_count = video_info.get('view_count')
-        like_count = video_info.get('like_count')
-        
-        # Format numbers
         views_str = f"{view_count:,}" if view_count else "Unknown"
-        likes_str = f"{like_count:,}" if like_count else "Unknown"
         
-        # Create caption
-        caption = f"📹 {title[:100]}{'...' if len(title) > 100 else ''}\n\n"
-        caption += f"👤 Uploader: {uploader[:50]}\n"
-        caption += f"⏱ Duration: {duration_str}\n"
-        caption += f"👁 Views: {views_str}\n"
-        caption += f"👍 Likes: {likes_str}\n"
-        caption += f"🏷 Platform: {platform_name}\n"
+        caption = f"📹 {title}\n\n"
+        caption += f"👤 {uploader}\n"
+        caption += f"⏱ {duration_str} | 👁 {views_str}\n"
+        caption += f"🏷 {platform_name}\n"
         
         if selected_format:
-            caption += f"📊 Quality: {selected_format.get('resolution', 'Unknown')}\n"
+            caption += f"📊 {selected_format.get('resolution', 'Unknown')}\n"
         
-        # Add URL
-        url_display = url
-        if len(url) > 80:
-            url_display = url[:77] + "..."
+        url_display = url[:80] + "..." if len(url) > 80 else url
         caption += f"\n🔗 {url_display}"
         
-        # Ensure caption doesn't exceed Telegram limits
-        if len(caption) > 1000:
-            caption = caption[:997] + "..."
-        
-        return caption
-        
-    except Exception as e:
-        logger.error(f"Error creating caption: {e}")
+        return caption[:1000]
+    except:
         return f"📹 Downloaded from {platform_name}\n🔗 {url[:100]}..."
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -525,50 +469,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"Message from {user.id}: {text[:50]}")
     
-    # Check if it's a URL
     if not text.startswith(('http://', 'https://')):
         await update.message.reply_text("Please send a valid URL starting with http:// or https://")
         return
     
-    # Check if supported
     if not is_supported(text):
-        platforms_list = "\n".join([f"• {name}" for name in PLATFORM_NAMES.values()])
-        await update.message.reply_text(
-            f"❌ Platform not supported.\n\n"
-            f"Supported platforms:\n{platforms_list}"
-        )
+        platforms = "\n".join([f"• {name}" for name in PLATFORM_NAMES.values()])
+        await update.message.reply_text(f"❌ Platform not supported.\n\nSupported:\n{platforms}")
         return
     
-    # Detect platform
     platform = detect_platform(text)
-    
-    # Send processing message
     msg = await update.message.reply_text(f"⏳ Analyzing {PLATFORM_NAMES.get(platform, platform)} link...")
     
     try:
-        # Get video information
         await msg.edit_text("📋 Getting video information...")
         video_info = await get_video_info(text)
         
-        # Get available formats
         await msg.edit_text("🔍 Checking available qualities...")
         formats = await get_available_formats(text)
         
         if not formats or len(formats) == 0:
-            await msg.edit_text("❌ No available formats found or video is not accessible.")
+            await msg.edit_text("❌ No available formats found.")
             return
         
-        # Store session
         session = DownloadSession(text, platform, formats)
         user_sessions[chat_id] = session
         
-        # Create quality selection keyboard
         keyboard = []
-        for i, fmt in enumerate(formats[:10]):  # Limit to 10 options
+        for i, fmt in enumerate(formats[:8]):
             if i % 2 == 0:
                 keyboard.append([])
             
-            # Button text with quality and size
             resolution = fmt.get('resolution', 'Unknown')
             size_str = fmt.get('filesize_str', 'Unknown')
             button_text = f"{resolution} ({size_str})"
@@ -578,27 +509,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f"quality:{i}:{fmt['id']}"
             ))
         
-        # Add cancel button
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Send format selection message
         platform_name = PLATFORM_NAMES.get(platform, platform.capitalize())
-        selection_text = f"🎬 *{platform_name} Video Download*\n\n"
+        selection_text = f"🎬 *{platform_name} Video*\n\n"
         
         if video_info:
-            title = video_info.get('title', 'Unknown')[:100]
-            duration = video_info.get('duration', 0)
-            if duration:
-                minutes = int(duration // 60)
-                seconds = int(duration % 60)
-                duration_str = f"{minutes}:{seconds:02d}"
-                selection_text += f"📹 *Title:* {title}\n"
-                selection_text += f"⏱ *Duration:* {duration_str}\n\n"
+            title = video_info.get('title', 'Unknown')[:80]
+            selection_text += f"📹 {title}\n\n"
         
-        selection_text += f"📊 *Available Qualities:*\n"
-        selection_text += f"(Select one from below)\n\n"
+        selection_text += "📊 *Select Quality:*\n"
         
         await msg.edit_text(
             selection_text,
@@ -607,14 +528,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     except Exception as e:
-        logger.error(f"Error in handle_message: {e}")
-        error_msg = f"❌ Error: {str(e)}"
-        if "private" in str(e).lower() or "login" in str(e).lower():
-            error_msg += "\n\n🔒 This video may be private or require login. Try adding cookies using /cookies command."
-        await msg.edit_text(error_msg)
+        logger.error(f"Error: {e}")
+        await msg.edit_text(f"❌ Error: {str(e)[:100]}")
 
 async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle quality selection callback"""
+    """Handle quality selection"""
     query = update.callback_query
     await query.answer()
     
@@ -622,63 +540,52 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     data = query.data
     
     if data == "cancel":
-        # Clear session
         if chat_id in user_sessions:
             del user_sessions[chat_id]
-        
         await query.message.edit_text("❌ Download cancelled.")
         return
     
     if data.startswith("quality:"):
         try:
-            # Parse callback data
             parts = data.split(":")
             format_index = int(parts[1])
             format_id = parts[2]
             
-            # Get session
             session = user_sessions.get(chat_id)
             if not session:
-                await query.message.edit_text("❌ Session expired. Please send the link again.")
+                await query.message.edit_text("❌ Session expired. Please send link again.")
                 return
             
-            # Get selected format
             if 0 <= format_index < len(session.formats):
                 selected_format = session.formats[format_index]
                 session.selected_format = selected_format
                 
-                # Update message
                 platform_name = PLATFORM_NAMES.get(session.platform, session.platform.capitalize())
                 size_str = selected_format.get('filesize_str', 'Unknown')
                 resolution = selected_format.get('resolution', 'Unknown')
                 
                 await query.message.edit_text(
                     f"✅ Selected: {resolution} ({size_str})\n"
-                    f"⬇️ Downloading from {platform_name}...",
-                    parse_mode=ParseMode.MARKDOWN
+                    f"⬇️ Downloading from {platform_name}..."
                 )
                 
-                # Start download
                 await perform_download(chat_id, session, query.message)
-                
             else:
-                await query.message.edit_text("❌ Invalid format selection.")
+                await query.message.edit_text("❌ Invalid selection.")
                 
         except Exception as e:
-            logger.error(f"Error in quality selection: {e}")
-            await query.message.edit_text(f"❌ Error: {str(e)}")
+            logger.error(f"Selection error: {e}")
+            await query.message.edit_text(f"❌ Error: {str(e)[:100]}")
 
 async def perform_download(chat_id, session, message):
-    """Perform the actual download"""
+    """Download and send video"""
     try:
-        # Create user directory
         user_dir = Path(f"downloads/{chat_id}")
         user_dir.mkdir(parents=True, exist_ok=True)
         
         unique_id = uuid4().hex[:8]
         output_template = f"{user_dir}/{unique_id}.%(ext)s"
         
-        # Build download command
         cookies_path = "cookies/cookies.txt"
         cookies_args = []
         if os.path.exists(cookies_path):
@@ -695,29 +602,21 @@ async def perform_download(chat_id, session, message):
             session.url
         ]
         
-        logger.info(f"Downloading with command: {' '.join(cmd[:8])}...")
+        await message.edit_text("⬇️ Downloading...")
         
-        # Start download process
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         
-        await message.edit_text("⬇️ Downloading... (This may take a moment)")
-        
-        # Wait for download to complete
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
         
         if process.returncode != 0:
             error = stderr.decode('utf-8', errors='ignore').strip()
-            logger.error(f"Download error: {error}")
-            
-            # Try with fallback format
             if "format is not available" in error:
-                await message.edit_text("⚠️ Selected format not available. Trying fallback...")
+                await message.edit_text("⚠️ Trying fallback quality...")
                 
-                # Fallback to best quality
                 fallback_cmd = [
                     "yt-dlp",
                     *cookies_args,
@@ -735,12 +634,7 @@ async def perform_download(chat_id, session, message):
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                stdout2, stderr2 = await asyncio.wait_for(process2.communicate(), timeout=300)
-                
-                if process2.returncode != 0:
-                    error2 = stderr2.decode('utf-8', errors='ignore').strip()
-                    await message.edit_text(f"❌ Download failed: {error2[:200]}")
-                    return
+                await process2.communicate()
         
         # Find downloaded file
         downloaded_file = None
@@ -753,87 +647,43 @@ async def perform_download(chat_id, session, message):
             await message.edit_text("❌ File not found after download")
             return
         
-        # Check file size
         file_size = downloaded_file.stat().st_size
         if file_size > 50 * 1024 * 1024:
             await message.edit_text(f"❌ File too large ({file_size/1024/1024:.1f}MB > 50MB)")
             downloaded_file.unlink()
             return
         
-        # Get video info for caption
         video_info = await get_video_info(session.url)
+        caption = create_caption(video_info, session.platform, session.url, session.selected_format)
         
-        # Create caption
-        caption = create_video_caption(video_info, session.platform, session.url, session.selected_format)
-        
-        # Send file
-        await message.edit_text("📤 Uploading to Telegram...")
+        await message.edit_text("📤 Uploading...")
         
         with open(downloaded_file, 'rb') as f:
-            # Detect MIME type
-            try:
-                result = subprocess.run(
-                    ['file', '-b', '--mime-type', str(downloaded_file)],
-                    capture_output=True, text=True, timeout=5
-                )
-                mime_type = result.stdout.strip() if result.returncode == 0 else 'video/mp4'
-            except:
-                mime_type = 'video/mp4'
-            
-            # Send based on file type
-            if mime_type.startswith('video'):
-                await message.reply_video(
-                    video=f,
-                    caption=caption,
-                    supports_streaming=True,
-                    read_timeout=120,
-                    write_timeout=120
-                )
-            elif mime_type.startswith('image'):
-                await message.reply_photo(
-                    photo=f,
-                    caption=caption,
-                    read_timeout=60
-                )
-            else:
-                await message.reply_document(
-                    document=f,
-                    caption=caption,
-                    read_timeout=60
-                )
+            await message.reply_video(
+                video=f,
+                caption=caption,
+                supports_streaming=True,
+                read_timeout=120,
+                write_timeout=120
+            )
         
-        # Update status
         size_mb = file_size / 1024 / 1024
         platform_name = PLATFORM_NAMES.get(session.platform, session.platform.capitalize())
         await message.edit_text(f"✅ Download complete!\n📦 {platform_name} - {size_mb:.1f}MB")
         
-        # Cleanup
         if downloaded_file.exists():
             downloaded_file.unlink()
         
-        # Clear session
         if chat_id in user_sessions:
             del user_sessions[chat_id]
         
     except asyncio.TimeoutError:
-        await message.edit_text("❌ Download timeout. The video might be too large or the server is slow.")
+        await message.edit_text("❌ Download timeout.")
     except Exception as e:
-        logger.error(f"Error in perform_download: {e}")
+        logger.error(f"Download error: {e}")
         await message.edit_text(f"❌ Error: {str(e)[:200]}")
-        
-        # Cleanup on error
         if chat_id in user_sessions:
             del user_sessions[chat_id]
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors"""
-    logger.error(f"Update {update} caused error: {context.error}")
-    
-    if update and update.effective_chat:
-        try:
-            await update.effective_chat.send_message("⚠️ An error occurred. Please try again or send /start")
-        except:
-            pass
 
 def main():
     """Start the bot"""
@@ -841,100 +691,116 @@ def main():
         logger.error("❌ BOT_TOKEN not found!")
         return
     
-    # Create application
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("cookies", cookies_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_quality_selection))
     
-    # Error handler
-    app.add_error_handler(error_handler)
-    
-    # Start bot
-    logger.info("🤖 Enhanced Bot starting...")
+    logger.info("🤖 Bot starting...")
     print("=" * 50)
-    print("✅ Enhanced Bot with Quality Selection")
-    print("✅ Supporting all requested platforms")
-    print("✅ User can choose quality before download")
+    print("✅ Bot with Quality Selection")
+    print("✅ Supports 20+ platforms")
     print("=" * 50)
     
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
-EOF
+BOT_EOF
 
-# 8. اسکریپت‌های مدیریت ایجاد کنید
-cat > start.sh << 'EOF'
+# 8. Create management scripts
+echo -e "${YELLOW}📁 Creating management scripts...${NC}"
+
+cat > start.sh << 'START_EOF'
 #!/bin/bash
-# Start the enhanced bot
-
-echo "🚀 Starting Enhanced Downloader Bot..."
+echo "🚀 Starting Video Downloader Bot..."
 source venv/bin/activate
 python3 bot.py
-EOF
+START_EOF
 
-cat > stop.sh << 'EOF'
+cat > stop.sh << 'STOP_EOF'
 #!/bin/bash
-# Stop the bot
-
 echo "🛑 Stopping bot..."
 pkill -f "python3 bot.py" 2>/dev/null && echo "✅ Bot stopped" || echo "⚠️ Bot not running"
-EOF
+STOP_EOF
 
-cat > restart.sh << 'EOF'
+cat > restart.sh << 'RESTART_EOF'
 #!/bin/bash
-# Restart bot
-
-echo "🔄 Restarting Enhanced Bot..."
+echo "🔄 Restarting bot..."
 ./stop.sh
 sleep 2
 ./start.sh
-EOF
+RESTART_EOF
 
-cat > clear_cookies.sh << 'EOF'
+cat > test.sh << 'TEST_EOF'
 #!/bin/bash
-# Clear cookies
+echo "🔧 Testing setup..."
+source venv/bin/activate
+python3 -c "
+import sys
+print('✅ Python version:', sys.version[:6])
+try:
+    import telegram
+    print('✅ python-telegram-bot installed')
+except:
+    print('❌ python-telegram-bot missing')
+try:
+    import dotenv
+    print('✅ python-dotenv installed')
+except:
+    print('❌ python-dotenv missing')
+import subprocess
+result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True)
+if result.returncode == 0:
+    print(f'✅ yt-dlp: {result.stdout.strip()}')
+else:
+    print('❌ yt-dlp not working')
+"
+TEST_EOF
 
-echo "🧹 Clearing cookies..."
-rm -f cookies/cookies.txt 2>/dev/null
-echo "✅ Cookies cleared"
-EOF
+chmod +x bot.py start.sh stop.sh restart.sh test.sh
 
-chmod +x bot.py start.sh stop.sh restart.sh clear_cookies.sh
-
-# 9. فایل requirements.txt ایجاد کنید
-cat > requirements.txt << 'EOF'
+# 9. Create requirements.txt
+cat > requirements.txt << 'REQS_EOF'
 python-telegram-bot==20.7
 python-dotenv==1.0.0
-EOF
+REQS_EOF
 
-# 10. تست کنید
-echo "🎉 Setup Complete!"
-echo ""
-echo "📁 Files created:"
+# 10. Display completion message
+echo -e "\n${GREEN}==========================================${NC}"
+echo -e "${GREEN}✅ Installation Complete!${NC}"
+echo -e "${GREEN}==========================================${NC}"
+
+echo -e "\n📁 ${YELLOW}Project Structure:${NC}"
 ls -la
-echo ""
-echo "🚀 To start bot: ./start.sh"
-echo "🛑 To stop bot: ./stop.sh"
-echo "🔄 To restart: ./restart.sh"
-echo ""
-echo "✨ Features:"
-echo "✅ Quality selection before download"
-echo "✅ File size display for each quality"
-echo "✅ Supports 20+ platforms including Iranian platforms"
-echo "✅ Cookie support for private videos"
-echo "✅ Max 50MB file size"
-echo ""
-echo "📱 Supported Platforms:"
-echo "• TikTok, Facebook, YouTube, Instagram"
-echo "• Twitter/X, Reddit, Pinterest, Likee"
-echo "• Twitch, Dailymotion, Streamable, Vimeo"
-echo "• Rumble, Bilibili, TED"
-echo "• Aparat, Namava, Filimo, Tiva (Iranian)"
-echo ""
-echo "🤖 Bot is ready! Run ./start.sh to start"
+
+echo -e "\n🚀 ${YELLOW}Available Commands:${NC}"
+echo -e "  ${GREEN}./start.sh${NC}    - Start the bot"
+echo -e "  ${GREEN}./stop.sh${NC}     - Stop the bot"
+echo -e "  ${GREEN}./restart.sh${NC}  - Restart the bot"
+echo -e "  ${GREEN}./test.sh${NC}     - Test installation"
+
+echo -e "\n📱 ${YELLOW}Supported Platforms:${NC}"
+echo -e "  • TikTok, Facebook, YouTube, Instagram"
+echo -e "  • Twitter/X, Reddit, Pinterest, Likee"
+echo -e "  • Twitch, Dailymotion, Streamable, Vimeo"
+echo -e "  • Rumble, Bilibili, TED"
+echo -e "  • Aparat, Namava, Filimo, Tiva"
+
+echo -e "\n✨ ${GREEN}Features:${NC}"
+echo -e "  ✅ Choose quality before download"
+echo -e "  ✅ See file size for each quality"
+echo -e "  ✅ Supports all requested platforms"
+echo -e "  ✅ Video information included"
+echo -e "  ✅ Max 50MB file size"
+
+echo -e "\n${YELLOW}📝 To start the bot:${NC}"
+echo -e "1. ${GREEN}cd telegram-video-bot${NC}"
+echo -e "2. ${GREEN}./start.sh${NC}"
+
+echo -e "\n${YELLOW}🎯 Your bot token is saved in:${NC}"
+echo -e "  ${GREEN}.env${NC} file"
+
+echo -e "\n${GREEN}🤖 Your bot is ready to use!${NC}"
