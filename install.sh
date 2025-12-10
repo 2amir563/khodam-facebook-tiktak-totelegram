@@ -24,7 +24,7 @@ sudo apt update
 sudo apt install -y python3 python3-pip python3-venv curl ffmpeg
 
 # 2. Install yt-dlp
-echo -e "${YELLow}⬇️ Installing yt-dlp...${NC}"
+echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
 echo -e "${GREEN}✅ yt-dlp installed${NC}"
@@ -55,13 +55,13 @@ fi
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved${NC}"
 
-# 6. Create bot.py with video info caption
-echo -e "${YELLOW}📝 Creating bot.py with video info...${NC}"
+# 6. Create bot.py with safe caption
+echo -e "${YELLOW}📝 Creating bot.py with safe caption...${NC}"
 
 cat << 'EOF' > $BOT_FILE
 #!/usr/bin/env python3
 """
-Simple Telegram Downloader Bot with Video Info Caption
+Simple Telegram Downloader Bot with Safe Caption
 """
 import os
 import sys
@@ -69,6 +69,7 @@ import logging
 import subprocess
 import asyncio
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -108,7 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• TikTok\n• Facebook\n• YouTube\n"
         "• Instagram\n• Twitter/X\n• Reddit\n\n"
         "📝 *Send me a link!*\n\n"
-        "✨ *New:* Video information included in caption!\n\n"
+        "✨ *New:* Video information included!\n\n"
         "⚠️ *Note:*\n"
         "• Max 50MB\n• Public videos only\n"
         "• Facebook: Use direct links\n"
@@ -151,6 +152,28 @@ def is_supported(url):
             return True
     return False
 
+def clean_text(text):
+    """Clean text for Telegram Markdown"""
+    if not text:
+        return ""
+    
+    # Escape special Markdown characters
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    cleaned = text
+    for char in special_chars:
+        cleaned = cleaned.replace(char, f'\\{char}')
+    
+    # Remove or replace problematic characters
+    cleaned = cleaned.replace('`', "'")
+    cleaned = cleaned.replace('```', "'''")
+    
+    # Limit length to avoid Telegram limits
+    if len(cleaned) > 800:
+        cleaned = cleaned[:797] + "..."
+    
+    return cleaned
+
 async def get_video_info(url):
     """Get video information using yt-dlp"""
     try:
@@ -171,9 +194,9 @@ async def get_video_info(url):
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
         if process.returncode == 0:
-            return json.loads(stdout.decode('utf-8'))
+            return json.loads(stdout.decode('utf-8', errors='ignore'))
         else:
-            logger.warning(f"Could not get video info: {stderr.decode('utf-8', errors='ignore')}")
+            logger.warning(f"Could not get video info: {stderr.decode('utf-8', errors='ignore')[:100]}")
             return None
             
     except asyncio.TimeoutError:
@@ -186,11 +209,12 @@ async def get_video_info(url):
         logger.error(f"Error getting video info: {e}")
         return None
 
-def create_caption(video_info, platform, url, file_size=None):
-    """Create caption from video info"""
+def create_safe_caption(video_info, platform, url, file_size=None):
+    """Create safe caption from video info"""
+    # Basic caption if no info available
     if not video_info:
-        # Basic caption if no info available
-        caption = f"📹 Downloaded from {platform.capitalize()}\n🔗 {url}"
+        caption = f"📹 Downloaded from {platform.capitalize()}\n"
+        caption += f"🔗 {url}"
         if file_size:
             caption += f"\n📦 Size: {file_size/1024/1024:.1f}MB"
         return caption
@@ -199,6 +223,10 @@ def create_caption(video_info, platform, url, file_size=None):
         # Extract information with fallbacks
         title = video_info.get('title', 'Unknown Title')
         uploader = video_info.get('uploader', 'Unknown Uploader')
+        
+        # Clean text
+        title = clean_text(title)
+        uploader = clean_text(uploader)
         
         # Duration
         duration = video_info.get('duration', 0)
@@ -217,22 +245,29 @@ def create_caption(video_info, platform, url, file_size=None):
         views_str = f"{view_count:,}" if view_count else "Unknown"
         likes_str = f"{like_count:,}" if like_count else "Unknown"
         
-        # Create caption
+        # Create safe caption without Markdown formatting
         caption = (
-            f"📹 *{title[:100]}{'...' if len(title) > 100 else ''}*\n\n"
-            f"👤 *Uploader:* {uploader}\n"
-            f"⏱ *Duration:* {duration_str}\n"
-            f"👁 *Views:* {views_str}\n"
-            f"👍 *Likes:* {likes_str}\n"
-            f"🏷 *Platform:* {platform.capitalize()}\n"
+            f"📹 {title[:150]}{'...' if len(title) > 150 else ''}\n\n"
+            f"👤 Uploader: {uploader[:100]}{'...' if len(uploader) > 100 else ''}\n"
+            f"⏱ Duration: {duration_str}\n"
+            f"👁 Views: {views_str}\n"
+            f"👍 Likes: {likes_str}\n"
+            f"🏷 Platform: {platform.capitalize()}\n"
         )
         
         # Add file size if available
         if file_size:
-            caption += f"📦 *File Size:* {file_size/1024/1024:.1f}MB\n"
+            caption += f"📦 File Size: {file_size/1024/1024:.1f}MB\n"
         
-        # Add URL
-        caption += f"\n🔗 *Original URL:*\n{url}"
+        # Add URL (split if too long)
+        url_display = url
+        if len(url) > 100:
+            url_display = url[:97] + "..."
+        caption += f"\n🔗 URL: {url_display}"
+        
+        # Ensure caption doesn't exceed Telegram limits
+        if len(caption) > 1000:
+            caption = caption[:997] + "..."
         
         return caption
         
@@ -412,11 +447,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path.unlink()
             return
         
-        # Create caption with video info
-        caption = create_caption(video_info, platform, text, file_size)
+        # Create safe caption (without Markdown formatting)
+        caption = create_safe_caption(video_info, platform, text, file_size)
         
         # Send file
-        await msg.edit_text("📤 Uploading with info...")
+        await msg.edit_text("📤 Uploading...")
         
         with open(file_path, 'rb') as f:
             # Check file type
@@ -433,7 +468,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_video(
                     video=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120
@@ -442,14 +476,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_photo(
                     photo=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     read_timeout=60
                 )
             else:
                 await update.message.reply_document(
                     document=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     read_timeout=60
                 )
         
@@ -569,7 +601,7 @@ except:
     sys.exit(1)
 
 # Check packages
-packages = ["telegram", "dotenv", "json"]
+packages = ["telegram", "dotenv", "json", "re"]
 for pkg in packages:
     try:
         __import__(pkg)
@@ -603,16 +635,14 @@ for dir in ["downloads", "logs", "venv"]:
 
 print("=" * 30)
 print("🎉 Setup complete!")
-print("\n✨ *New Feature:* Video information in caption!")
-print("   📹 Title and uploader")
-print("   ⏱ Duration")
-print("   👁 Views and likes")
-print("   🏷 Platform")
-print("   📦 File size")
-print("   🔗 Original URL")
+print("\n✨ *Safe Caption Feature:*")
+print("   📹 Clean text for all platforms")
+print("   ✅ No more Markdown parsing errors")
+print("   🔧 Works with Twitter/X, Reddit, etc.")
+print("   📋 Full video information included")
 print("\nTo start: ./start.sh")
 print("To stop:  ./stop.sh")
-print("\n💡 Works with all supported platforms!")
+print("\n💡 Now works perfectly with all platforms!")
 EOF
 
 chmod +x test.py
@@ -636,21 +666,20 @@ echo -e "\n⚙️ ${YELLOW}Other commands:${NC}"
 echo -e "  ${GREEN}./stop.sh${NC}      # Stop bot"
 echo -e "  ${GREEN}./restart.sh${NC}   # Restart"
 echo -e "  ${GREEN}./test.py${NC}      # Test setup"
-echo -e "\n✨ ${GREEN}New Features:${NC}"
-echo -e "  📹 Video information for ALL platforms"
-echo -e "  📋 Title, uploader, duration"
-echo -e "  👁 Views and likes count"
-echo -e "  🏷 Platform name"
-echo -e "  📦 File size"
-echo -e "  🔗 Original URL"
-echo -e "\n📱 ${YELLOW}Works with:${NC}"
+echo -e "\n✨ ${GREEN}Fixed Features:${NC}"
+echo -e "  ✅ No more Markdown parsing errors"
+echo -e "  ✅ Works with Twitter/X and all platforms"
+echo -e "  ✅ Clean text with emojis"
+echo -e "  ✅ Safe caption for Telegram"
+echo -e "\n📱 ${YELLOW}Works perfectly with:${NC}"
+echo -e "  • Twitter/X (no parsing errors)"
 echo -e "  • TikTok\n  • Facebook\n  • YouTube"
-echo -e "  • Instagram\n  • Twitter/X\n  • Reddit"
+echo -e "  • Instagram\n  • Reddit"
 echo -e "\n${RED}⚠️ Important:${NC}"
-echo -e "  • Some platforms may have limited info"
+echo -e "  • No Markdown in captions (safer)"
 echo -e "  • Max 50MB per file"
 echo -e "  • Public videos only"
-echo -e "\n${GREEN}🤖 Bot ready with video info captions!${NC}"
+echo -e "\n${GREEN}🤖 Bot ready with safe captions!${NC}"
 
 # 11. Test and ask to start
 echo -e "\n${YELLOW}Test installation? (y/n)${NC}"
