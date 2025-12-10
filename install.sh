@@ -21,43 +21,133 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}🛠️ Starting Telegram Downloader Bot Installation...${NC}"
 
+# Clean up any existing virtual environment
+echo -e "${YELLOW}🧹 Cleaning up previous installation...${NC}"
+rm -rf venv downloads logs cookies
+mkdir -p downloads logs cookies
+
 # 1. Update packages and install prerequisites
 echo -e "${YELLOW}📦 Updating system packages and installing dependencies...${NC}"
 sudo apt update
-sudo apt install -y python3 python3-pip git curl libmagic1 ffmpeg python3-venv wget
+sudo apt install -y python3 python3-pip python3-venv git curl libmagic1 ffmpeg wget
 
-# 2. Install yt-dlp with Facebook cookies support
-echo -e "${YELLOW}⬇️ Installing yt-dlp with Facebook support...${NC}"
+# Check Python version
+PYTHON_VERSION=$(python3 --version)
+echo -e "${GREEN}✅ Python version: $PYTHON_VERSION${NC}"
+
+# 2. Install yt-dlp
+echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
 
-# Install cookies browser extensions for yt-dlp
-echo -e "${YELLOW}🍪 Installing Facebook cookies extractor...${NC}"
-python3 -m venv venv 2>/dev/null || true
-source venv/bin/activate
-pip install yt-dlp --upgrade
-pip install browser-cookie3
-
 # Test yt-dlp
 yt-dlp --version
-echo -e "${GREEN}✅ yt-dlp installed successfully${NC}"
+echo -e "${GREEN}✅ yt-dlp installed${NC}"
 
-# 3. Create directory structure
-echo -e "${YELLOW}📁 Creating directory structure...${NC}"
-mkdir -p downloads
-mkdir -p logs
-mkdir -p cookies
+# 3. Create virtual environment properly
+echo -e "${YELLOW}🐍 Creating Python virtual environment...${NC}"
 
-# 4. Recreate virtual environment and install Python libraries
-echo -e "${YELLOW}🐍 Setting up Python virtual environment...${NC}"
-python3 -m venv venv --clear
+# First, check if we need to clean python3 symlinks
+if [ -L "/usr/bin/python3" ]; then
+    echo -e "${YELLOW}⚠️ Found symbolic link for python3, checking...${NC}"
+    REAL_PYTHON=$(readlink -f /usr/bin/python3)
+    echo -e "${GREEN}Real python3 path: $REAL_PYTHON${NC}"
+fi
+
+# Remove any broken venv
+rm -rf venv
+
+# Create virtual environment with explicit python path
+PYTHON_PATH=$(which python3)
+echo -e "${YELLOW}Using Python at: $PYTHON_PATH${NC}"
+
+$PYTHON_PATH -m venv venv --clear
+
+# Verify venv creation
+if [ ! -f "venv/bin/activate" ]; then
+    echo -e "${RED}❌ Failed to create virtual environment${NC}"
+    echo -e "${YELLOW}Trying alternative method...${NC}"
+    
+    # Try pip install virtualenv
+    pip3 install virtualenv --user
+    virtualenv venv
+fi
+
+# Activate virtual environment
 source venv/bin/activate
 
-# Upgrade pip first
-pip install --upgrade pip
+# Check if activation worked
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo -e "${RED}❌ Virtual environment activation failed${NC}"
+    echo -e "${YELLOW}Using system Python instead...${NC}"
+else
+    echo -e "${GREEN}✅ Virtual environment activated: $VIRTUAL_ENV${NC}"
+fi
 
-# Install required packages
-pip install python-telegram-bot python-dotenv uuid browser-cookie3 requests
+# 4. Install Python packages
+echo -e "${YELLOW}📦 Installing Python packages...${NC}"
+
+# Upgrade pip first
+python3 -m pip install --upgrade pip
+
+# Install packages with retry logic
+install_packages() {
+    local packages=("$@")
+    for package in "${packages[@]}"; do
+        echo -e "${YELLOW}Installing $package...${NC}"
+        
+        # Try with default pip
+        if python3 -m pip install "$package" --no-cache-dir; then
+            echo -e "${GREEN}✅ $package installed${NC}"
+        else
+            echo -e "${YELLOW}⚠️ Retrying $package with different method...${NC}"
+            
+            # Try without dependencies first
+            if python3 -m pip install "$package" --no-deps --no-cache-dir; then
+                echo -e "${GREEN}✅ $package installed (without deps)${NC}"
+                
+                # Try to install dependencies separately
+                if [ "$package" == "python-telegram-bot" ]; then
+                    python3 -m pip install "httpx~=0.24.0" "cryptography" --no-cache-dir
+                fi
+            else
+                echo -e "${RED}❌ Failed to install $package${NC}"
+                echo -e "${YELLOW}Trying from GitHub...${NC}"
+                
+                # Try GitHub for specific packages
+                case "$package" in
+                    "python-telegram-bot")
+                        python3 -m pip install "python-telegram-bot[job-queue]" --no-cache-dir || \
+                        python3 -m pip install "https://github.com/python-telegram-bot/python-telegram-bot/archive/refs/tags/v20.7.tar.gz" --no-cache-dir
+                        ;;
+                    "browser-cookie3")
+                        python3 -m pip install "browser-cookie3" --no-cache-dir || \
+                        echo -e "${YELLOW}⚠️ browser-cookie3 may not be available, skipping...${NC}"
+                        ;;
+                    *)
+                        echo -e "${YELLOW}⚠️ Skipping $package${NC}"
+                        ;;
+                esac
+            fi
+        fi
+    done
+}
+
+# List of packages to install
+PACKAGES=(
+    "python-telegram-bot[job-queue]"
+    "python-dotenv"
+    "uuid"
+    "requests"
+    "yt-dlp"
+)
+
+install_packages "${PACKAGES[@]}"
+
+# Try to install browser-cookie3 separately (optional)
+echo -e "${YELLOW}🍪 Installing browser-cookie3 (optional for Facebook)...${NC}"
+python3 -m pip install "browser-cookie3" --no-cache-dir 2>/dev/null || \
+echo -e "${YELLOW}⚠️ browser-cookie3 installation failed (optional package)${NC}"
 
 # 5. Configure Bot Token
 echo -e "${GREEN}🤖 Telegram Bot Configuration${NC}"
@@ -67,13 +157,19 @@ read -r BOT_TOKEN
 # Validate token format
 if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
     echo -e "${RED}❌ Invalid bot token format! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ${NC}"
-    exit 1
+    echo -e "${YELLOW}Please enter a valid token:${NC}"
+    read -r BOT_TOKEN
+    
+    if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
+        echo -e "${RED}❌ Invalid token again. Exiting...${NC}"
+        exit 1
+    fi
 fi
 
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved to $ENV_FILE${NC}"
 
-# 6. Create configuration file with Facebook-specific settings
+# 6. Create configuration file
 cat << 'EOF' > $CONFIG_FILE
 # =========================================================
 #                     Configuration
@@ -95,71 +191,62 @@ MAX_CONCURRENT_DOWNLOADS = 3
 # Paths
 DOWNLOAD_BASE_DIR = "./downloads"
 LOG_FILE = "./logs/bot.log"
-COOKIES_DIR = "./cookies"
 
-# Supported Platforms with detailed patterns
-SUPPORTED_PLATFORMS = {
-    "facebook": [
-        # Video patterns
-        r'facebook\.com/(?:watch/\?v=|video\.php\?v=|.*?/videos/|reel/|share/v/)',
-        r'fb\.watch/',
-        # Post patterns
-        r'facebook\.com/(?:photo\.php\?fbid=|share/p|permalink\.php\?story_fbid=)',
-        # Share patterns (new format)
-        r'facebook\.com/share/[^/]+/?'
-    ],
-    "tiktok": [
-        r'tiktok\.com/',
-        r'vm\.tiktok\.com/',
-        r'vt\.tiktok\.com/'
-    ],
-    "youtube": [
-        r'youtube\.com/',
-        r'youtu\.be/'
-    ],
-    "instagram": [
-        r'instagram\.com/',
-        r'instagr\.am/'
-    ],
-    "twitter": [
-        r'twitter\.com/',
-        r'x\.com/'
-    ],
-    "all_platforms": [
-        "terabox.com",
-        "streamable.com",
-        "pinterest.com",
-        "pin.it",
-        "snapchat.com",
-        "reddit.com",
-        "likee.video",
-        "like.com",
-        "loom.com",
-        "dailymotion.com",
-        "bilibili.com",
-        "twitch.tv",
-        "vimeo.com"
-    ]
-}
-
-# Facebook URL patterns for validation
-FACEBOOK_PATTERNS = {
-    "video": [
-        r'facebook\.com/watch/\?v=(\d+)',
-        r'facebook\.com/video\.php\?v=(\d+)',
-        r'facebook\.com/([^/]+)/videos/(\d+)',
-        r'fb\.watch/([a-zA-Z0-9_-]+)',
-        r'facebook\.com/reel/(\d+)',
-        r'facebook\.com/share/v/\?id=(\d+)'
-    ],
-    "post": [
-        r'facebook\.com/photo\.php\?fbid=(\d+)',
-        r'facebook\.com/share/p/[^/]+/(\d+)',
-        r'facebook\.com/permalink\.php\?story_fbid=(\d+)'
-    ],
-    "share": [
-        r'facebook\.com/share/([^/]+)/?'
-    ]
+# Platform-specific URL patterns
+PLATFORM_PATTERNS = {
+    "facebook": {
+        "valid": [
+            r'facebook\.com/watch/\?v=\d+',
+            r'fb\.watch/[a-zA-Z0-9_-]+',
+            r'facebook\.com/[^/]+/videos/\d+',
+            r'facebook\.com/reel/\d+',
+            r'facebook\.com/video\.php\?v=\d+',
+            r'facebook\.com/share/v/\?id=\d+'
+        ],
+        "invalid": [
+            r'facebook\.com/login',
+            r'facebook\.com/dialog',
+            r'facebook\.com/share/r/',
+            r'_fb_noscript=1'
+        ]
+    },
+    "tiktok": {
+        "valid": [
+            r'tiktok\.com/@[^/]+/video/\d+',
+            r'tiktok\.com/t/[^/]+',
+            r'vm\.tiktok\.com/[^/]+',
+            r'vt\.tiktok\.com/[^/]+'
+        ],
+        "invalid": [
+            r'tiktok\.com/login',
+            r'tiktok\.com/redirect'
+        ]
+    },
+    "youtube": {
+        "valid": [
+            r'youtube\.com/watch\?v=[^&]+',
+            r'youtu\.be/[^/]+',
+            r'youtube\.com/shorts/[^/]+'
+        ],
+        "invalid": []
+    },
+    "instagram": {
+        "valid": [
+            r'instagram\.com/p/[^/]+',
+            r'instagram\.com/reel/[^/]+',
+            r'instagram\.com/tv/[^/]+'
+        ],
+        "invalid": [
+            r'instagram\.com/accounts/login'
+        ]
+    },
+    "twitter": {
+        "valid": [
+            r'twitter\.com/[^/]+/status/\d+',
+            r'x\.com/[^/]+/status/\d+'
+        ],
+        "invalid": []
+    }
 }
 
 # yt-dlp Configuration
@@ -176,8 +263,7 @@ YT_DLP_OPTIONS = {
     'facebook': [
         '--format', 'best[height<=720][filesize<=50M]',
         '--max-filesize', '50M',
-        '--cookies-from-browser', 'chrome',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     ],
     'tiktok': [
         '--format', 'best[filesize<=50M]',
@@ -193,42 +279,67 @@ YT_DLP_OPTIONS = {
     ]
 }
 
-def clean_facebook_url(url: str) -> str:
-    """Clean Facebook URL from tracking parameters"""
+def clean_url(url: str) -> str:
+    """Clean URL by removing tracking parameters"""
+    import urllib.parse
+    
     # Remove common tracking parameters
-    patterns_to_remove = [
-        r'&_fb_noscript=1',
-        r'&__tn__=[^&]+',
-        r'&__cft__\[0\]=[^&]+',
-        r'&__xts__\[0\]=[^&]+',
-        r'&rdid=[^&]+',
-        r'&e=[^&]+'
+    params_to_remove = [
+        '_fb_noscript', '__tn__', '__cft__', '__xts__', 'rdid', 'e',
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+        'fbclid', 'gclid', 'msclkid'
     ]
     
-    cleaned = url
-    for pattern in patterns_to_remove:
-        cleaned = re.sub(pattern, '', cleaned)
+    try:
+        parsed = urllib.parse.urlparse(url)
+        query_dict = urllib.parse.parse_qs(parsed.query)
+        
+        # Remove unwanted parameters
+        for param in params_to_remove:
+            query_dict.pop(param, None)
+        
+        # Rebuild query
+        new_query = '&'.join([f"{k}={v[0]}" for k, v in query_dict.items()])
+        
+        # Rebuild URL
+        cleaned = parsed._replace(query=new_query if new_query else '').geturl()
+        
+        # Decode URL
+        cleaned = urllib.parse.unquote(cleaned)
+        
+        return cleaned
+    except:
+        return url
+
+def validate_url_for_platform(url: str, platform: str) -> dict:
+    """Validate URL for specific platform"""
+    url_lower = url.lower()
     
-    # Decode URL-encoded characters
-    import urllib.parse
-    cleaned = urllib.parse.unquote(cleaned)
+    # Check invalid patterns first
+    if platform in PLATFORM_PATTERNS:
+        for pattern in PLATFORM_PATTERNS[platform].get("invalid", []):
+            if re.search(pattern, url_lower):
+                return {
+                    "valid": False,
+                    "error": f"Invalid {platform} link detected. This appears to be a login/redirect/tracking link."
+                }
     
-    # Remove double question marks
-    cleaned = cleaned.replace('??', '?').replace('?&', '?')
+    # Check valid patterns
+    if platform in PLATFORM_PATTERNS:
+        for pattern in PLATFORM_PATTERNS[platform].get("valid", []):
+            if re.search(pattern, url_lower):
+                return {"valid": True}
     
-    # Remove trailing & or ?
-    cleaned = cleaned.rstrip('&?')
-    
-    return cleaned
+    return {"valid": False, "error": "Link format not recognized for this platform."}
 EOF
 
-# 7. Create the main bot file with enhanced Facebook support
-echo -e "${YELLOW}📝 Creating bot.py with improved Facebook handling...${NC}"
+# 7. Create the main bot file
+echo -e "${YELLOW}📝 Creating bot.py...${NC}"
 
 cat << 'EOF' > $BOT_FILE
 #!/usr/bin/env python3
 # =========================================================
-#                 Telegram Downloader Bot
+#           Universal Social Media Downloader Bot
 # =========================================================
 import os
 import sys
@@ -236,19 +347,16 @@ import re
 import logging
 import subprocess
 import asyncio
-import json
 import urllib.parse
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
-from typing import Optional, Tuple, Dict
 
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
 import bot_config
 
 # Configure logging
@@ -262,169 +370,143 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class URLProcessor:
-    """Process and validate URLs"""
+class URLValidator:
+    """Validate and process URLs for all platforms"""
     
     @staticmethod
-    def is_valid_url(url: str) -> bool:
-        """Check if URL has valid format"""
-        try:
-            result = urllib.parse.urlparse(url)
-            return all([result.scheme in ['http', 'https'], result.netloc])
-        except:
-            return False
-    
-    @staticmethod
-    def get_platform(url: str) -> Optional[str]:
-        """Determine platform from URL"""
+    def get_platform(url: str) -> str:
+        """Detect platform from URL"""
         url_lower = url.lower()
         
-        # Check Facebook patterns
-        for pattern in bot_config.SUPPORTED_PLATFORMS['facebook']:
-            if re.search(pattern, url_lower):
-                return 'facebook'
-        
-        # Check TikTok
-        for pattern in bot_config.SUPPORTED_PLATFORMS['tiktok']:
-            if re.search(pattern, url_lower):
-                return 'tiktok'
-        
-        # Check YouTube
-        for pattern in bot_config.SUPPORTED_PLATFORMS['youtube']:
-            if re.search(pattern, url_lower):
-                return 'youtube'
-        
-        # Check Instagram
-        for pattern in bot_config.SUPPORTED_PLATFORMS['instagram']:
-            if re.search(pattern, url_lower):
-                return 'instagram'
-        
-        # Check Twitter
-        for pattern in bot_config.SUPPORTED_PLATFORMS['twitter']:
-            if re.search(pattern, url_lower):
-                return 'twitter'
-        
-        # Check other platforms
-        for platform in bot_config.SUPPORTED_PLATFORMS['all_platforms']:
-            if platform in url_lower:
-                return platform.split('.')[0]  # Return domain without .com
-        
-        return None
+        if any(pattern in url_lower for pattern in ['facebook.com', 'fb.watch']):
+            return 'facebook'
+        elif any(pattern in url_lower for pattern in ['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com']):
+            return 'tiktok'
+        elif any(pattern in url_lower for pattern in ['youtube.com', 'youtu.be']):
+            return 'youtube'
+        elif 'instagram.com' in url_lower:
+            return 'instagram'
+        elif any(pattern in url_lower for pattern in ['twitter.com', 'x.com']):
+            return 'twitter'
+        elif 'reddit.com' in url_lower:
+            return 'reddit'
+        elif 'terabox.com' in url_lower:
+            return 'terabox'
+        elif 'streamable.com' in url_lower:
+            return 'streamable'
+        elif any(pattern in url_lower for pattern in ['pinterest.com', 'pin.it']):
+            return 'pinterest'
+        elif 'snapchat.com' in url_lower:
+            return 'snapchat'
+        elif 'loom.com' in url_lower:
+            return 'loom'
+        elif any(pattern in url_lower for pattern in ['likee.video', 'like.com']):
+            return 'likee'
+        elif 'dailymotion.com' in url_lower:
+            return 'dailymotion'
+        elif 'bilibili.com' in url_lower:
+            return 'bilibili'
+        elif 'twitch.tv' in url_lower:
+            return 'twitch'
+        elif 'vimeo.com' in url_lower:
+            return 'vimeo'
+        else:
+            return 'unknown'
     
     @staticmethod
-    def process_facebook_url(url: str) -> Dict:
-        """Process Facebook URL and extract info"""
+    def validate_url(url: str) -> dict:
+        """Validate URL and return platform info with detailed feedback"""
+        # Basic URL validation
+        if not url.startswith(('http://', 'https://')):
+            return {
+                "valid": False,
+                "error": "❌ Invalid URL format. Please send a valid URL starting with http:// or https://"
+            }
+        
         # Clean URL first
-        cleaned_url = bot_config.clean_facebook_url(url)
+        cleaned_url = bot_config.clean_url(url)
         
-        # Check for login/redirect URLs
-        if 'facebook.com/login' in cleaned_url or 'facebook.com/dialog' in cleaned_url:
-            # Try to extract real URL from parameters
-            parsed = urllib.parse.urlparse(cleaned_url)
-            query = urllib.parse.parse_qs(parsed.query)
+        # Detect platform
+        platform = URLValidator.get_platform(cleaned_url)
+        
+        if platform == 'unknown':
+            return {
+                "valid": False,
+                "error": "❌ Platform not supported. Send /start to see supported platforms."
+            }
+        
+        # Platform-specific validation
+        validation = bot_config.validate_url_for_platform(cleaned_url, platform)
+        
+        if not validation["valid"]:
+            error_msg = validation.get("error", f"Invalid {platform} link.")
             
-            extracted_url = None
-            if 'next' in query:
-                extracted_url = query['next'][0]
-            elif 'share_url' in query:
-                extracted_url = query['share_url'][0]
+            # Add platform-specific guidance
+            guidance = URLValidator.get_platform_guidance(platform)
+            if guidance:
+                error_msg += f"\n\n{guidance}"
             
-            if extracted_url and 'facebook.com' in extracted_url:
-                cleaned_url = urllib.parse.unquote(extracted_url)
-                logger.info(f"Extracted Facebook URL from login page: {cleaned_url}")
-        
-        # Validate Facebook URL type
-        url_type = None
-        video_id = None
-        
-        # Check for video patterns
-        for pattern in bot_config.FACEBOOK_PATTERNS['video']:
-            match = re.search(pattern, cleaned_url, re.IGNORECASE)
-            if match:
-                url_type = 'video'
-                video_id = match.group(1) if match.groups() else None
-                break
-        
-        # Check for post patterns
-        if not url_type:
-            for pattern in bot_config.FACEBOOK_PATTERNS['post']:
-                match = re.search(pattern, cleaned_url, re.IGNORECASE)
-                if match:
-                    url_type = 'post'
-                    video_id = match.group(1) if match.groups() else None
-                    break
-        
-        # Check for share patterns (new format)
-        if not url_type:
-            for pattern in bot_config.FACEBOOK_PATTERNS['share']:
-                match = re.search(pattern, cleaned_url, re.IGNORECASE)
-                if match:
-                    url_type = 'share'
-                    break
+            return {
+                "valid": False,
+                "error": error_msg,
+                "platform": platform,
+                "url": cleaned_url
+            }
         
         return {
-            'cleaned_url': cleaned_url,
-            'original_url': url,
-            'type': url_type,
-            'video_id': video_id,
-            'is_valid': url_type is not None
+            "valid": True,
+            "platform": platform,
+            "url": cleaned_url,
+            "original_url": url
         }
     
     @staticmethod
-    def validate_url(url: str) -> Dict:
-        """Validate URL and return platform info"""
-        # Basic URL validation
-        if not URLProcessor.is_valid_url(url):
-            return {
-                'valid': False,
-                'error': "Invalid URL format. Please send a valid URL starting with http:// or https://"
-            }
+    def get_platform_guidance(platform: str) -> str:
+        """Get guidance for specific platform"""
+        guidance = {
+            "facebook": (
+                "📘 *Facebook Link Guide:*\n"
+                "✅ Use DIRECT video links like:\n"
+                "• https://www.facebook.com/watch/?v=123456789\n"
+                "• https://fb.watch/abc123def/\n"
+                "• https://www.facebook.com/username/videos/123456789\n\n"
+                "❌ Avoid these:\n"
+                "• Login pages (facebook.com/login)\n"
+                "• Share redirects (facebook.com/share/r/)\n"
+                "• Links with '_fb_noscript=1'\n\n"
+                "💡 *Tip:* Click on video timestamp to get direct link."
+            ),
+            "tiktok": (
+                "📘 *TikTok Link Guide:*\n"
+                "✅ Use standard TikTok links:\n"
+                "• https://www.tiktok.com/@username/video/123456789\n"
+                "• https://vm.tiktok.com/abc123def/\n\n"
+                "❌ Avoid:\n"
+                "• Private/direct message links\n"
+                "• Deleted videos\n"
+                "• Login/redirect pages"
+            ),
+            "instagram": (
+                "📘 *Instagram Link Guide:*\n"
+                "✅ Use public post links:\n"
+                "• https://www.instagram.com/p/abc123def/\n"
+                "• https://www.instagram.com/reel/abc123def/\n\n"
+                "❌ Avoid:\n"
+                "• Private account posts\n"
+                "• Stories (unless public)\n"
+                "• Login pages"
+            ),
+            "youtube": (
+                "📘 *YouTube Link Guide:*\n"
+                "✅ Standard links work fine:\n"
+                "• https://www.youtube.com/watch?v=abc123def\n"
+                "• https://youtu.be/abc123def\n"
+                "• https://www.youtube.com/shorts/abc123def\n\n"
+                "⚠️ Note: Max 50MB file size"
+            )
+        }
         
-        # Get platform
-        platform = URLProcessor.get_platform(url)
-        if not platform:
-            return {
-                'valid': False,
-                'error': "Platform not supported. Send /start to see supported platforms."
-            }
-        
-        # Platform-specific processing
-        if platform == 'facebook':
-            facebook_info = URLProcessor.process_facebook_url(url)
-            
-            if not facebook_info['is_valid']:
-                error_msg = (
-                    "Invalid Facebook link format!\n\n"
-                    "✅ *Valid Facebook links should look like:*\n"
-                    "• https://www.facebook.com/watch/?v=123456789\n"
-                    "• https://fb.watch/abc123def/\n"
-                    "• https://www.facebook.com/username/videos/123456789\n"
-                    "• https://www.facebook.com/reel/123456789\n\n"
-                    "❌ *Avoid these:*\n"
-                    "• Login pages (facebook.com/login)\n"
-                    "• Messaging links\n"
-                    "• Private/share links with tokens\n\n"
-                    "Send /fbhelp for detailed instructions."
-                )
-                return {'valid': False, 'error': error_msg}
-            
-            return {
-                'valid': True,
-                'platform': platform,
-                'url': facebook_info['cleaned_url'],
-                'original_url': facebook_info['original_url'],
-                'type': facebook_info['type'],
-                'video_id': facebook_info['video_id']
-            }
-        else:
-            return {
-                'valid': True,
-                'platform': platform,
-                'url': url,
-                'original_url': url,
-                'type': 'video',
-                'video_id': None
-            }
+        return guidance.get(platform, "Please ensure the content is public and accessible.")
 
 class DownloadManager:
     def __init__(self):
@@ -437,7 +519,7 @@ class DownloadManager:
         chat_dir.mkdir(exist_ok=True)
         return chat_dir
     
-    def cleanup_old_files(self, chat_dir: Path, max_age_hours: int = 24):
+    def cleanup_old_files(self, chat_dir: Path, max_age_hours: int = 6):
         """Clean up files older than specified hours"""
         try:
             now = datetime.now()
@@ -446,87 +528,79 @@ class DownloadManager:
                     file_age = now - datetime.fromtimestamp(file_path.stat().st_mtime)
                     if file_age.total_seconds() > max_age_hours * 3600:
                         file_path.unlink()
-                        logger.info(f"Cleaned up old file: {file_path}")
+                        logger.debug(f"Cleaned up old file: {file_path}")
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome_msg = (
-        "👋 *Welcome to Downloader Bot!*\n\n"
+        "👋 *Universal Downloader Bot*\n\n"
         "📥 *Supported Platforms:*\n"
-        "• *Facebook*: Videos, Reels, Public posts\n"
-        "• *TikTok*: All videos\n"
+        "• *Facebook*: Public videos\n"
+        "• *TikTok*: All public videos\n"
         "• *YouTube*: Videos, Shorts (50MB max)\n"
-        "• *Instagram*: Posts, Reels, Stories\n"
+        "• *Instagram*: Posts, Reels\n"
         "• *Twitter/X*: Videos\n"
         "• *Reddit*: Videos\n"
         "• *Terabox*: Videos\n"
         "• *Streamable*: Videos\n"
         "• *Pinterest*: Images & Videos\n"
         "• *Snapchat*: Spotlight\n"
-        "• *Loom*: Videos\n\n"
+        "• *Loom*: Videos\n"
+        "• *Likee*: Videos\n"
+        "• *DailyMotion*: Videos\n"
+        "• *Bilibili*: Videos\n"
+        "• *Twitch*: Clips\n"
+        "• *Vimeo*: Videos\n\n"
         "📝 *How to use:*\n"
-        "Just send me a link from any supported platform!\n\n"
+        "Send me a link from any supported platform!\n\n"
         "⚠️ *Important:*\n"
         "• Max file size: 50MB\n"
         "• Only public content\n"
-        "• Videos must be accessible\n\n"
+        "• No login/redirect links\n\n"
         "🔧 *Commands:*\n"
         "/start - Show this message\n"
         "/help - Get help\n"
-        "/fbhelp - Facebook download guide\n"
+        "/guide - Platform-specific guides\n"
         "/examples - Example links"
     )
     await update.message.reply_text(welcome_msg, parse_mode='Markdown')
 
-async def fbhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Facebook download guide"""
+async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show platform guides"""
     guide_msg = (
-        "📘 *Facebook Download Guide*\n\n"
-        "1. *Get the RIGHT link:*\n"
-        "   • Open Facebook in *browser* (not app)\n"
-        "   • Find the video you want\n"
-        "   • Click on the *timestamp* (e.g., '2 hours ago')\n"
-        "   • Copy URL from address bar\n\n"
-        "2. *Good link examples:*\n"
-        "   ```\n"
-        "   https://www.facebook.com/watch/?v=123456789\n"
-        "   https://fb.watch/abc123def/\n"
-        "   https://www.facebook.com/username/videos/123456789\n"
-        "   https://www.facebook.com/reel/123456789\n"
-        "   ```\n\n"
-        "3. *Bad links (WON'T WORK):*\n"
-        "   ```\n"
-        "   https://www.facebook.com/login/...\n"
-        "   https://www.facebook.com/share/r/...\n"
-        "   https://www.facebook.com/share/video/...\n"
-        "   ```\n\n"
-        "4. *Quick fix for bad links:*\n"
-        "   • Go to the video\n"
-        "   • Click ••• (more options)\n"
-        "   • Click 'Copy link'\n"
-        "   • Send that link here\n\n"
-        "Need more help? Send your link and I'll check it!"
+        "📘 *Platform Guides*\n\n"
+        "*Facebook:*\n"
+        "Use direct video links:\n"
+        "`https://www.facebook.com/watch/?v=123456789`\n"
+        "`https://fb.watch/abc123def/`\n\n"
+        "*TikTok:*\n"
+        "`https://www.tiktok.com/@user/video/123456789`\n"
+        "`https://vm.tiktok.com/abc123def/`\n\n"
+        "*YouTube:*\n"
+        "`https://www.youtube.com/watch?v=abc123def`\n"
+        "`https://youtu.be/abc123def`\n\n"
+        "*Instagram:*\n"
+        "`https://www.instagram.com/p/abc123def/`\n"
+        "`https://www.instagram.com/reel/abc123def/`\n\n"
+        "Need specific help? Send your link!"
     )
     await update.message.reply_text(guide_msg, parse_mode='Markdown')
 
 async def examples_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show example links"""
     examples_msg = (
-        "🔗 *Example Links for Testing:*\n\n"
-        "*Facebook Video:*\n"
-        "`https://www.facebook.com/facebook/videos/10153231379946729/`\n"
-        "`https://fb.watch/abcExample/`\n\n"
+        "🔗 *Example Links:*\n\n"
+        "*Facebook:*\n"
+        "`https://www.facebook.com/watch/?v=123456789`\n\n"
         "*TikTok:*\n"
-        "`https://www.tiktok.com/@example/video/123456789`\n"
-        "`https://vm.tiktok.com/abcdef/`\n\n"
+        "`https://www.tiktok.com/@example/video/123456789`\n\n"
         "*YouTube:*\n"
-        "`https://www.youtube.com/shorts/abc123def`\n"
-        "`https://youtu.be/abc123def`\n\n"
+        "`https://www.youtube.com/watch?v=dQw4w9WgXcQ`\n\n"
         "*Instagram:*\n"
-        "`https://www.instagram.com/reel/abc123def/`\n\n"
-        "Try one of these or send your own link!"
+        "`https://www.instagram.com/p/Cabcdef/`\n\n"
+        "Try these or send your own link!"
     )
     await update.message.reply_text(examples_msg, parse_mode='Markdown')
 
@@ -537,16 +611,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*How to download:*\n"
         "1. Copy link from supported platform\n"
         "2. Send link to this bot\n"
-        "3. Wait for download\n"
-        "4. Receive file\n\n"
+        "3. Wait for processing\n"
+        "4. Receive downloaded file\n\n"
         "*Common issues:*\n"
-        "• *Facebook login link*: Send /fbhelp\n"
+        "• *Invalid link*: Send /guide for correct formats\n"
         "• *File too large*: Max 50MB\n"
-        "• *Private video*: Must be public\n"
-        "• *Unsupported link*: Check /start\n\n"
+        "• *Private content*: Must be public\n"
+        "• *Login/redirect links*: Get direct link\n\n"
         "*Commands:*\n"
         "/start - Welcome message\n"
-        "/fbhelp - Facebook guide\n"
+        "/guide - Link format guide\n"
         "/examples - Example links\n"
         "/help - This message"
     )
@@ -561,28 +635,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Message from {user.id} ({user.username}): {text[:100]}...")
     
     # Validate URL
-    validation = URLProcessor.validate_url(text)
+    validator = URLValidator()
+    validation = validator.validate_url(text)
+    
     if not validation["valid"]:
         await update.message.reply_text(validation["error"], parse_mode='Markdown')
         return
     
     platform = validation["platform"]
     url = validation["url"]
-    
-    # Special handling for Facebook share links
-    if platform == 'facebook' and validation.get('type') == 'share':
-        await update.message.reply_text(
-            "⚠️ *Facebook Share Link Detected*\n\n"
-            "This type of link (facebook.com/share/r/...) usually doesn't work for downloading.\n\n"
-            "Please get the *direct video link* instead:\n"
-            "1. Open the video in browser\n"
-            "2. Click on the timestamp\n"
-            "3. Copy that URL\n"
-            "4. Send it here\n\n"
-            "Send /fbhelp for detailed instructions.",
-            parse_mode='Markdown'
-        )
-        return
     
     # Initialize download manager
     dm = DownloadManager()
@@ -592,7 +653,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Send initial message
     status_msg = await update.message.reply_text(
         f"⏳ *Processing {platform.upper()} link...*\n"
-        f"URL: `{url[:100]}{'...' if len(url) > 100 else ''}`\n"
         f"Platform: {platform}\n"
         f"Please wait...",
         parse_mode='Markdown'
@@ -602,7 +662,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # Update status
-        await status_msg.edit_text(f"⬇️ *Downloading from {platform}...* This may take a moment.", parse_mode='Markdown')
+        await status_msg.edit_text(f"⬇️ *Downloading from {platform}...*", parse_mode='Markdown')
         
         # Download file
         downloaded_file = await download_with_ytdlp(url, platform, chat_dir)
@@ -634,25 +694,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Successfully sent {platform} file to {user.id}")
         
     except FileNotFoundError as e:
-        error_msg = f"❌ *File Not Found*\nThe file was downloaded but could not be located.\n\nError: `{str(e)}`"
+        error_msg = f"❌ *File Not Found*\n\nError: `{str(e)}`"
         await status_msg.edit_text(error_msg, parse_mode='Markdown')
         logger.error(f"File not found for {url}: {e}")
         
     except Exception as e:
-        error_msg = f"❌ *Download Failed*\n\nPlatform: {platform}\nError: `{str(e)}`\n\n"
+        error_msg = f"❌ *Download Failed*\n\nPlatform: {platform}\nError: `{str(e)}`"
         
-        # Platform-specific advice
+        # Add platform-specific advice
         if platform == 'facebook':
-            error_msg += "*Facebook tips:*\n"
-            error_msg += "• Video must be public\n"
-            error_msg += "• Try getting direct link\n"
-            error_msg += "• Send /fbhelp for guide\n"
+            error_msg += "\n\n💡 *Facebook Tip:* Ensure you're using a direct video link, not a login/share link."
         elif platform == 'tiktok':
-            error_msg += "*TikTok tips:*\n"
-            error_msg += "• Video might be private\n"
-            error_msg += "• Try different link\n"
-        else:
-            error_msg += "Please try again or use a different link."
+            error_msg += "\n\n💡 *TikTok Tip:* Video might be private or region-restricted."
         
         await status_msg.edit_text(error_msg, parse_mode='Markdown')
         logger.error(f"Download failed for {url}: {e}")
@@ -681,9 +734,9 @@ async def download_with_ytdlp(url: str, platform: str, output_path: Path) -> Pat
         yt_dlp_options.extend(bot_config.YT_DLP_OPTIONS['default'])
     
     # Build command
-    cmd = ["yt-dlp"] + yt_dlp_options + ["--output", output_template, url]
+    cmd = ["yt-dlp"] + yt_dlp_options + ["-o", output_template, url]
     
-    logger.info(f"Executing yt-dlp for {platform}: {' '.join(cmd[:10])}...")
+    logger.info(f"Executing yt-dlp for {platform}")
     
     try:
         # Run yt-dlp
@@ -697,43 +750,30 @@ async def download_with_ytdlp(url: str, platform: str, output_path: Path) -> Pat
         
         if process.returncode != 0:
             error_text = stderr.decode('utf-8', errors='ignore').strip()
-            error_lines = [line.strip() for line in error_text.split('\n') if line.strip()]
             
             # Parse common errors
             if "Unsupported URL" in error_text:
-                if platform == 'facebook':
-                    raise Exception("Facebook link not supported. Video might be private or requires login.")
-                else:
-                    raise Exception("Link not supported by yt-dlp.")
+                raise Exception("Link not supported or requires login.")
             elif "Private video" in error_text or "Video unavailable" in error_text:
                 raise Exception("Video is private or unavailable.")
-            elif "Sign in to confirm" in error_text:
-                raise Exception("Facebook requires login. Try a different public video.")
-            elif error_lines:
-                last_error = error_lines[-1]
-                raise Exception(f"Download error: {last_error}")
+            elif "Sign in" in error_text:
+                raise Exception("Content requires login. Try different public content.")
             else:
-                raise Exception("Unknown download error.")
+                # Get last meaningful error line
+                error_lines = [line.strip() for line in error_text.split('\n') if line.strip()]
+                last_error = error_lines[-1] if error_lines else "Unknown error"
+                raise Exception(f"Download error: {last_error}")
         
         # Find downloaded file
         downloaded_file = None
         
-        # Method 1: Look in yt-dlp output
-        output_text = stdout.decode('utf-8', errors='ignore')
-        for line in output_text.split('\n'):
-            line = line.strip()
-            if line and os.path.exists(line) and output_path in Path(line).parents:
-                downloaded_file = Path(line)
+        # Method 1: Search for file with unique ID
+        for file_path in output_path.glob(f"{unique_id}.*"):
+            if file_path.is_file() and file_path.stat().st_size > 0:
+                downloaded_file = file_path
                 break
         
-        # Method 2: Search for file with unique ID
-        if not downloaded_file:
-            for file_path in output_path.glob(f"{unique_id}.*"):
-                if file_path.is_file() and file_path.stat().st_size > 0:
-                    downloaded_file = file_path
-                    break
-        
-        # Method 3: Find newest file in directory
+        # Method 2: Look for newest file
         if not downloaded_file:
             files = list(output_path.glob("*"))
             if files:
@@ -745,12 +785,12 @@ async def download_with_ytdlp(url: str, platform: str, output_path: Path) -> Pat
                     downloaded_file = newest_file
         
         if not downloaded_file or not downloaded_file.exists():
-            raise FileNotFoundError(f"Downloaded file not found. Searched for pattern: {unique_id}.*")
+            raise FileNotFoundError("Downloaded file not found")
         
         return downloaded_file
         
     except asyncio.TimeoutError:
-        raise Exception(f"Download timed out after {bot_config.DOWNLOAD_TIMEOUT//60} minutes")
+        raise Exception("Download timed out")
     except Exception as e:
         raise e
 
@@ -759,16 +799,18 @@ async def get_mime_type(file_path: Path) -> str:
     try:
         result = subprocess.run(
             ['file', '-b', '--mime-type', str(file_path)],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=5
         )
         return result.stdout.strip()
     except:
         # Fallback based on extension
         ext = file_path.suffix.lower()
-        if ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+        if ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv']:
             return 'video/mp4'
-        elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+        elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
             return 'image/jpeg'
+        elif ext in ['.mp3', '.m4a', '.wav', '.ogg']:
+            return 'audio/mpeg'
         else:
             return 'application/octet-stream'
 
@@ -776,36 +818,48 @@ async def send_file_to_telegram(update: Update, context: ContextTypes.DEFAULT_TY
                                file_path: Path, url: str, mime_type: str):
     """Send file to Telegram"""
     chat_id = update.effective_chat.id
+    file_size = file_path.stat().st_size
     
-    with open(file_path, 'rb') as f:
-        if mime_type.startswith('video'):
-            await context.bot.send_video(
-                chat_id=chat_id,
-                video=f,
-                caption=f"✅ Downloaded from: {url}",
-                supports_streaming=True,
-                read_timeout=60,
-                write_timeout=60,
-                connect_timeout=60
-            )
-        elif mime_type.startswith('image'):
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=f,
-                caption=f"✅ Downloaded from: {url}",
-                read_timeout=60
-            )
-        else:
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=f,
-                caption=f"✅ Downloaded from: {url}",
-                read_timeout=60
-            )
+    try:
+        with open(file_path, 'rb') as f:
+            if mime_type.startswith('video'):
+                await context.bot.send_video(
+                    chat_id=chat_id,
+                    video=f,
+                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    supports_streaming=True,
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=120
+                )
+            elif mime_type.startswith('image'):
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=f,
+                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    read_timeout=60
+                )
+            elif mime_type.startswith('audio'):
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=f,
+                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    read_timeout=60
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    caption=f"✅ Downloaded\nSize: {file_size/1024/1024:.1f}MB",
+                    read_timeout=60
+                )
+    except Exception as e:
+        logger.error(f"Failed to send file: {e}")
+        raise Exception(f"Failed to upload to Telegram: {str(e)}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
-    logger.error(f"Update {update} caused error: {context.error}")
+    logger.error(f"Error: {context.error}", exc_info=True)
     
     if update and update.effective_chat:
         try:
@@ -832,7 +886,7 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("fbhelp", fbhelp_command))
+    application.add_handler(CommandHandler("guide", guide_command))
     application.add_handler(CommandHandler("examples", examples_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
@@ -845,10 +899,16 @@ def main():
     print("✅ Bot is running! Press Ctrl+C to stop.")
     print("=" * 60)
     
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True
-    )
+    try:
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            close_loop=False
+        )
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
 
 if __name__ == "__main__":
     main()
@@ -857,12 +917,13 @@ EOF
 # Make bot.py executable
 chmod +x $BOT_FILE
 
-# 8. Create startup script
+# 8. Create management scripts
+echo -e "${YELLOW}📁 Creating management scripts...${NC}"
+
+# Start script
 cat << 'EOF' > start_bot.sh
 #!/bin/bash
 # Start Telegram Downloader Bot
-
-set -e
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
@@ -871,16 +932,16 @@ cd "$DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${GREEN}🚀 Starting Telegram Downloader Bot...${NC}"
 
-# Check if bot is already running
+# Check if already running
 if pgrep -f "python3.*bot.py" > /dev/null; then
     echo -e "${YELLOW}⚠️ Bot is already running!${NC}"
-    echo -e "To restart: ${YELLOW}pkill -f bot.py && ./start_bot.sh${NC}"
-    exit 1
+    echo -e "PID: $(pgrep -f "python3.*bot.py")"
+    echo -e "To restart: ${YELLOW}./restart_bot.sh${NC}"
+    exit 0
 fi
 
 # Check .env
@@ -891,21 +952,21 @@ if [ ! -f .env ]; then
 fi
 
 # Create directories
-mkdir -p downloads logs cookies
+mkdir -p downloads logs
+
+# Check Python
+if [ ! -f "venv/bin/activate" ]; then
+    echo -e "${RED}❌ Virtual environment not found!${NC}"
+    echo -e "${YELLOW}Please run the installation script first.${NC}"
+    exit 1
+fi
 
 # Activate venv
 source venv/bin/activate
 
-# Check dependencies
-echo -e "${YELLOW}🔧 Checking dependencies...${NC}"
-if ! python3 -c "import telegram, yt_dlp, browser_cookie3" &> /dev/null; then
-    echo -e "${YELLOW}Installing missing packages...${NC}"
-    pip install python-telegram-bot yt-dlp python-dotenv browser-cookie3 requests --upgrade
-fi
-
-# Update yt-dlp
-echo -e "${YELLOW}⬆️ Updating yt-dlp...${NC}"
-yt-dlp -U
+# Update yt-dlp if possible
+echo -e "${YELLOW}🔧 Checking for updates...${NC}"
+python3 -m pip install --upgrade yt-dlp 2>/dev/null || true
 
 # Start bot
 echo -e "${GREEN}🤖 Starting bot...${NC}"
@@ -916,18 +977,7 @@ echo -e "${YELLOW}🛑 Press Ctrl+C to stop${NC}"
 exec python3 bot.py
 EOF
 
-chmod +x start_bot.sh
-
-# 9. Create requirements file
-cat << 'EOF' > requirements.txt
-python-telegram-bot>=20.7
-yt-dlp>=2024.4.9
-python-dotenv>=1.0.0
-browser-cookie3>=0.19.1
-requests>=2.31.0
-EOF
-
-# 10. Create management scripts
+# Stop script
 cat << 'EOF' > stop_bot.sh
 #!/bin/bash
 # Stop Telegram Downloader Bot
@@ -935,14 +985,23 @@ cat << 'EOF' > stop_bot.sh
 echo "🛑 Stopping bot..."
 
 # Kill bot process
-pkill -f "python3.*bot.py" 2>/dev/null && echo "✅ Bot stopped" || echo "ℹ️ Bot was not running"
+if pgrep -f "python3.*bot.py" > /dev/null; then
+    pkill -f "python3.*bot.py"
+    echo "✅ Bot stopped"
+else
+    echo "ℹ️ Bot was not running"
+fi
 
-# Kill yt-dlp processes if any
-pkill -f "yt-dlp" 2>/dev/null && echo "✅ Cleaned up yt-dlp processes"
+# Kill yt-dlp processes
+if pgrep -f "yt-dlp" > /dev/null; then
+    pkill -f "yt-dlp"
+    echo "✅ Cleaned up yt-dlp processes"
+fi
 
 sleep 2
 EOF
 
+# Restart script
 cat << 'EOF' > restart_bot.sh
 #!/bin/bash
 # Restart Telegram Downloader Bot
@@ -953,203 +1012,182 @@ sleep 3
 ./start_bot.sh
 EOF
 
-cat << 'EOF' > view_logs.sh
-#!/bin/bash
-# View bot logs
-
-LOG_FILE="logs/bot.log"
-
-if [ ! -f "$LOG_FILE" ]; then
-    echo "No log file found. Starting bot first..."
-    ./start_bot.sh
-else
-    echo "📋 Showing logs. Press Ctrl+C to exit."
-    echo "=" * 60
-    tail -100f "$LOG_FILE"
-fi
-EOF
-
+# Status script
 cat << 'EOF' > status_bot.sh
 #!/bin/bash
 # Check bot status
 
-echo "🤖 Bot Status Check"
-echo "=================="
+echo "🤖 Bot Status"
+echo "============"
 
-# Check if bot is running
 if pgrep -f "python3.*bot.py" > /dev/null; then
-    echo "✅ Bot is RUNNING"
-    echo "PID: $(pgrep -f "python3.*bot.py")"
+    echo "✅ Status: RUNNING"
+    echo "📊 PID: $(pgrep -f "python3.*bot.py")"
+    echo "⏰ Uptime: $(ps -p $(pgrep -f "python3.*bot.py") -o etime= 2>/dev/null || echo "Unknown")"
 else
-    echo "❌ Bot is STOPPED"
+    echo "❌ Status: STOPPED"
 fi
 
-# Check yt-dlp processes
-yt_dlp_count=$(pgrep -f "yt-dlp" | wc -l)
-if [ $yt_dlp_count -gt 0 ]; then
-    echo "📥 Active downloads: $yt_dlp_count"
+# Check active downloads
+YT_DLP_COUNT=$(pgrep -f "yt-dlp" | wc -l)
+if [ $YT_DLP_COUNT -gt 0 ]; then
+    echo "📥 Active downloads: $YT_DLP_COUNT"
 fi
 
 # Check log file
 if [ -f "logs/bot.log" ]; then
-    echo "📊 Last log entry:"
-    tail -1 logs/bot.log 2>/dev/null || echo "No recent logs"
+    LOG_SIZE=$(du -h logs/bot.log | cut -f1)
+    echo "📄 Log size: $LOG_SIZE"
+    echo "📋 Last activity:"
+    tail -3 logs/bot.log 2>/dev/null | while read line; do echo "  $line"; done
 fi
 
-echo "=================="
+echo "============"
 EOF
 
-chmod +x stop_bot.sh restart_bot.sh view_logs.sh status_bot.sh
+# Log viewer
+cat << 'EOF' > view_logs.sh
+#!/bin/bash
+# View bot logs
 
-# 11. Create Facebook link tester
-cat << 'EOF' > test_facebook_link.py
+echo "📋 Bot Logs"
+echo "==========="
+
+if [ ! -f "logs/bot.log" ]; then
+    echo "No log file found."
+    echo "Starting bot to create logs..."
+    ./start_bot.sh
+    exit 0
+fi
+
+echo "Showing last 50 lines. Press Ctrl+C to exit."
+echo ""
+tail -50f logs/bot.log
+EOF
+
+# Make scripts executable
+chmod +x start_bot.sh stop_bot.sh restart_bot.sh status_bot.sh view_logs.sh
+
+# 9. Create a simple test script
+cat << 'EOF' > test_bot.py
 #!/usr/bin/env python3
 """
-Facebook Link Tester
-Test if a Facebook link is valid for downloading
+Simple test to verify bot installation
 """
-import re
 import sys
-import urllib.parse
+import os
 
-def test_facebook_link(url):
-    """Test Facebook link and provide feedback"""
-    print(f"\n🔍 Testing Facebook link: {url[:100]}...")
+def test_installation():
+    print("🔧 Testing bot installation...")
+    print("=" * 40)
     
-    # Common patterns that WON'T work
-    bad_patterns = [
-        (r'facebook\.com/login', "❌ LOGIN PAGE - Won't work"),
-        (r'facebook\.com/share/r/', "❌ SHARE REDIRECT - Get direct link"),
-        (r'facebook\.com/share/video/', "❌ VIDEO SHARE - Get direct link"),
-        (r'facebook\.com/dialog/', "❌ DIALOG PAGE - Won't work"),
-        (r'_fb_noscript=1', "❌ NOSCRIPT - Remove this parameter"),
-        (r'messenger\.com', "❌ MESSENGER - Use Facebook.com link"),
+    # Check Python
+    try:
+        import platform
+        print(f"✅ Python: {platform.python_version()}")
+    except:
+        print("❌ Python not found")
+        return False
+    
+    # Check packages
+    packages = [
+        ("telegram", "python-telegram-bot"),
+        ("dotenv", "python-dotenv"),
+        ("yt_dlp", "yt-dlp"),
+        ("requests", "requests")
     ]
     
-    for pattern, message in bad_patterns:
-        if re.search(pattern, url, re.IGNORECASE):
-            print(message)
+    for import_name, package_name in packages:
+        try:
+            __import__(import_name)
+            print(f"✅ {package_name}")
+        except ImportError as e:
+            print(f"❌ {package_name}: {str(e)}")
             return False
     
-    # Good patterns that SHOULD work
-    good_patterns = [
-        (r'facebook\.com/watch/\?v=\d+', "✅ DIRECT VIDEO LINK - Should work"),
-        (r'fb\.watch/[a-zA-Z0-9_-]+', "✅ FB.WATCH LINK - Should work"),
-        (r'facebook\.com/[^/]+/videos/\d+', "✅ PROFILE VIDEO - Should work"),
-        (r'facebook\.com/reel/\d+', "✅ REEL - Should work"),
-        (r'facebook\.com/video\.php\?v=\d+', "✅ OLD FORMAT - Should work"),
-    ]
+    # Check .env
+    if os.path.exists(".env"):
+        print("✅ .env file exists")
+        with open(".env", "r") as f:
+            content = f.read()
+            if "BOT_TOKEN" in content:
+                print("✅ BOT_TOKEN found in .env")
+            else:
+                print("⚠️ BOT_TOKEN not found in .env")
+    else:
+        print("❌ .env file not found")
+        return False
     
-    for pattern, message in good_patterns:
-        if re.search(pattern, url, re.IGNORECASE):
-            print(message)
-            return True
+    # Check directories
+    directories = ["downloads", "logs", "venv"]
+    for dir_name in directories:
+        if os.path.exists(dir_name):
+            print(f"✅ Directory: {dir_name}")
+        else:
+            print(f"❌ Directory missing: {dir_name}")
+            if dir_name == "venv":
+                return False
     
-    print("⚠️ UNKNOWN FORMAT - Might not work")
-    print("\n💡 Tips:")
-    print("1. Get direct link by clicking on video timestamp")
-    print("2. Avoid links with 'login', 'share/r', or 'dialog'")
-    print("3. Use browser (not app) to copy link")
-    return False
-
-def clean_url(url):
-    """Try to clean Facebook URL"""
-    # Remove tracking parameters
-    params_to_remove = ['_fb_noscript', '__tn__', '__cft__', '__xts__', 'rdid', 'e']
-    
-    parsed = urllib.parse.urlparse(url)
-    query_dict = urllib.parse.parse_qs(parsed.query)
-    
-    # Remove unwanted parameters
-    for param in params_to_remove:
-        query_dict.pop(param, None)
-    
-    # Rebuild query
-    new_query = '&'.join([f"{k}={v[0]}" for k, v in query_dict.items()])
-    
-    # Rebuild URL
-    cleaned = parsed._replace(query=new_query if new_query else '').geturl()
-    
-    # Decode URL
-    cleaned = urllib.parse.unquote(cleaned)
-    
-    return cleaned
+    print("=" * 40)
+    print("✅ All tests passed!")
+    print("\nTo start the bot:")
+    print("  ./start_bot.sh")
+    return True
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Facebook Link Tester")
-    print("=" * 60)
-    
-    if len(sys.argv) > 1:
-        url = sys.argv[1]
-        test_facebook_link(url)
-        
-        # Try to clean it
-        cleaned = clean_url(url)
-        if cleaned != url:
-            print(f"\n🔄 Cleaned URL: {cleaned[:100]}...")
-            print("Try this cleaned version:")
-            test_facebook_link(cleaned)
-    else:
-        print("\nUsage: python3 test_facebook_link.py <facebook_url>")
-        print("\nExample bad links that WON'T work:")
-        print("https://www.facebook.com/share/r/1GffigLR68/")
-        print("https://www.facebook.com/login/...")
-        print("\nExample good links that SHOULD work:")
-        print("https://www.facebook.com/watch/?v=123456789")
-        print("https://fb.watch/abc123def/")
-        print("https://www.facebook.com/username/videos/123456789")
+    success = test_installation()
+    sys.exit(0 if success else 1)
 EOF
 
-chmod +x test_facebook_link.py
+chmod +x test_bot.py
 
-# 12. Final instructions
+# 10. Create requirements.txt
+cat << 'EOF' > requirements.txt
+python-telegram-bot[job-queue]>=20.7
+python-dotenv>=1.0.0
+yt-dlp>=2024.4.9
+requests>=2.31.0
+uuid>=1.30
+EOF
+
+# 11. Final instructions
 echo -e "\n${GREEN}==================================================${NC}"
 echo -e "${GREEN}✅ Installation Complete!${NC}"
 echo -e "${GREEN}==================================================${NC}"
 echo -e "\n📁 ${YELLOW}Project Structure:${NC}"
-echo -e "  ├── 📄 bot.py                 # Main bot file"
-echo -e "  ├── 📄 .env                   # Bot token"
-echo -e "  ├── 📄 bot_config.py          # Configuration"
-echo -e "  ├── 📄 test_facebook_link.py  # Link tester"
-echo -e "  ├── 📁 downloads/             # Temporary downloads"
-echo -e "  ├── 📁 logs/                  # Log files"
-echo -e "  ├── 📁 cookies/               # Browser cookies"
-echo -e "  └── 📁 venv/                  # Python environment"
-echo -e "\n🚀 ${YELLOW}How to start:${NC}"
-echo -e "  ${GREEN}./start_bot.sh${NC}              # Start bot"
-echo -e "  ${GREEN}nohup ./start_bot.sh &${NC}      # Start in background"
-echo -e "\n⚙️ ${YELLOW}Management commands:${NC}"
-echo -e "  ${GREEN}./stop_bot.sh${NC}               # Stop bot"
-echo -e "  ${GREEN}./restart_bot.sh${NC}            # Restart bot"
-echo -e "  ${GREEN}./status_bot.sh${NC}             # Check status"
-echo -e "  ${GREEN}./view_logs.sh${NC}              # View logs"
-echo -e "\n🔧 ${YELLOW}Test Facebook links:${NC}"
-echo -e "  ${GREEN}python3 test_facebook_link.py \"URL\"${NC}"
-echo -e "\n📝 ${YELLOW}Testing the bot:${NC}"
-echo -e "  1. Send /start to your bot"
-echo -e "  2. Send a valid Facebook link (not login/share link)"
-echo -e "  3. Example: https://www.facebook.com/watch/?v=123456789"
-echo -e "\n${RED}⚠️  Important for Facebook:${NC}"
-echo -e "  • Use DIRECT video links, not login/share links"
-echo -e "  • Links should contain 'watch/?v=' or '/videos/'"
-echo -e "  • Avoid 'facebook.com/share/r/' links"
-echo -e "  • Send /fbhelp in bot for instructions"
-echo -e "\n${GREEN}🤖 Bot is ready!${NC}"
+ls -la
+echo -e "\n🚀 ${YELLOW}Quick Start:${NC}"
+echo -e "  ${GREEN}./start_bot.sh${NC}        # Start the bot"
+echo -e "  ${GREEN}./test_bot.py${NC}        # Test installation"
+echo -e "\n⚙️ ${YELLOW}Management:${NC}"
+echo -e "  ${GREEN}./stop_bot.sh${NC}        # Stop bot"
+echo -e "  ${GREEN}./restart_bot.sh${NC}     # Restart bot"
+echo -e "  ${GREEN}./status_bot.sh${NC}      # Check status"
+echo -e "  ${GREEN}./view_logs.sh${NC}       # View logs"
+echo -e "\n📝 ${YELLOW}Testing:${NC}"
+echo -e "  1. Run: ${GREEN}./test_bot.py${NC}"
+echo -e "  2. Start: ${GREEN}./start_bot.sh${NC}"
+echo -e "  3. Send /start to your bot on Telegram"
+echo -e "\n${RED}⚠️ Important Notes:${NC}"
+echo -e "  • Bot only downloads PUBLIC content"
+echo -e "  • Max file size: 50MB"
+echo -e "  • Avoid login/redirect links"
+echo -e "  • Use direct video links"
+echo -e "\n${GREEN}🤖 Bot is ready to use!${NC}"
 echo -e "${GREEN}==================================================${NC}"
 
-# 13. Start bot in background
-echo -e "\n${YELLOW}Starting bot in background...${NC}"
+# 12. Test installation
+echo -e "\n${YELLOW}🔧 Running installation test...${NC}"
 source venv/bin/activate
-nohup python3 bot.py > logs/bot.log 2>&1 &
+python3 test_bot.py
 
-sleep 5
+# 13. Start bot option
+echo -e "\n${YELLOW}Do you want to start the bot now? (y/n)${NC}"
+read -r START_NOW
 
-if pgrep -f "python3.*bot.py" > /dev/null; then
-    echo -e "${GREEN}✅ Bot started successfully!${NC}"
-    echo -e "${YELLOW}📝 Check logs: tail -f logs/bot.log${NC}"
-    echo -e "${YELLOW}🔧 Check status: ./status_bot.sh${NC}"
+if [[ $START_NOW =~ ^[Yy]$ ]]; then
+    echo -e "${GREEN}Starting bot...${NC}"
+    ./start_bot.sh
 else
-    echo -e "${RED}⚠️  Bot might not have started. Check logs.${NC}"
-    echo -e "${YELLOW}Run manually: ./start_bot.sh${NC}"
+    echo -e "${YELLOW}To start later, run: ./start_bot.sh${NC}"
 fi
