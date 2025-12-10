@@ -1,67 +1,38 @@
-# 1. فایل را دانلود یا ایجاد کنید
-cat > install_enhanced.sh << 'INSTALL_EOF'
-#!/bin/bash
-
-# =========================================================
-#         Enhanced Telegram Downloader Bot Setup
-# =========================================================
-# Advanced bot for downloading videos from social media with quality selection
-
-set -e
-
-BOT_FILE="bot.py"
-ENV_FILE=".env"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-echo -e "${GREEN}🛠️ Enhanced Telegram Downloader Bot Setup${NC}"
-
-# 1. Install basic dependencies
-echo -e "${YELLOW}📦 Installing system dependencies...${NC}"
+# 1. اول وابستگی‌های سیستم را نصب کنید
 sudo apt update
-sudo apt install -y python3 python3-pip python3-venv curl ffmpeg
+sudo apt install -y python3 python3-pip python3-venv curl ffmpeg git
 
-# 2. Install yt-dlp with cookies support
-echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
+# 2. yt-dlp را نصب کنید
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
-echo -e "${GREEN}✅ yt-dlp installed${NC}"
 
-# 3. Create directories
-echo -e "${YELLOW}📁 Creating directories...${NC}"
+# 3. دایرکتوری پروژه را ایجاد کنید
+mkdir -p telegram-downloader-bot
+cd telegram-downloader-bot
 mkdir -p downloads logs cookies
 
-# 4. Create virtual environment
-echo -e "${YELLOW}🐍 Setting up Python environment...${NC}"
+# 4. محیط مجازی پایتون ایجاد کنید
 python3 -m venv venv
 source venv/bin/activate
 
-# Install Python packages
+# 5. کتابخانه‌های پایتون را نصب کنید
 pip install --upgrade pip
 pip install python-telegram-bot==20.7 python-dotenv==1.0.0
 
-# 5. Get Bot Token
-echo -e "${GREEN}🤖 Bot Token Configuration${NC}"
-echo -e "${YELLOW}Enter your Telegram Bot Token (from @BotFather):${NC}"
-read -r BOT_TOKEN
+# 6. توکن ربات را دریافت کنید
+echo "🤖 Telegram Bot Token Configuration"
+read -p "Enter your Telegram Bot Token (from @BotFather): " BOT_TOKEN
 
-if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
-    echo -e "${RED}❌ Invalid token! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ${NC}"
+if [[ ! $BOT_TOKEN =~ ^[0-9]+:[a-zA-Z09_-]+$ ]]; then
+    echo "❌ Invalid token! Example: 1234567890:ABCdefGHIJKLMnopQRSTuvwXYZ"
     exit 1
 fi
 
-echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
-echo -e "${GREEN}✅ Token saved${NC}"
+echo "BOT_TOKEN=$BOT_TOKEN" > .env
+echo "✅ Token saved to .env file"
 
-# 6. Create enhanced bot.py with quality selection
-echo -e "${YELLOW}📝 Creating enhanced bot.py with quality selection...${NC}"
-
-# First create a separate file for bot.py
-cat > $BOT_FILE << 'BOTPY_EOF'
+# 7. فایل bot.py را ایجاد کنید
+cat > bot.py << 'EOF'
 #!/usr/bin/env python3
 """
 Enhanced Telegram Downloader Bot with Quality Selection
@@ -895,35 +866,27 @@ def main():
 
 if __name__ == "__main__":
     main()
-BOTPY_EOF
+EOF
 
-# Make executable
-chmod +x $BOT_FILE
-
-# 7. Create enhanced management scripts
-echo -e "${YELLOW}📁 Creating enhanced scripts...${NC}"
-
-# Start script
-cat > start.sh << 'START_EOF'
+# 8. اسکریپت‌های مدیریت ایجاد کنید
+cat > start.sh << 'EOF'
 #!/bin/bash
 # Start the enhanced bot
 
 echo "🚀 Starting Enhanced Downloader Bot..."
 source venv/bin/activate
 python3 bot.py
-START_EOF
+EOF
 
-# Stop script
-cat > stop.sh << 'STOP_EOF'
+cat > stop.sh << 'EOF'
 #!/bin/bash
 # Stop the bot
 
 echo "🛑 Stopping bot..."
 pkill -f "python3 bot.py" 2>/dev/null && echo "✅ Bot stopped" || echo "⚠️ Bot not running"
-STOP_EOF
+EOF
 
-# Restart script
-cat > restart.sh << 'RESTART_EOF'
+cat > restart.sh << 'EOF'
 #!/bin/bash
 # Restart bot
 
@@ -931,151 +894,47 @@ echo "🔄 Restarting Enhanced Bot..."
 ./stop.sh
 sleep 2
 ./start.sh
-RESTART_EOF
+EOF
 
-# Clear cookies script
-cat > clear_cookies.sh << 'CLEARCOOKIES_EOF'
+cat > clear_cookies.sh << 'EOF'
 #!/bin/bash
 # Clear cookies
 
 echo "🧹 Clearing cookies..."
 rm -f cookies/cookies.txt 2>/dev/null
 echo "✅ Cookies cleared"
-CLEARCOOKIES_EOF
+EOF
 
-# Make scripts executable
-chmod +x start.sh stop.sh restart.sh clear_cookies.sh
+chmod +x bot.py start.sh stop.sh restart.sh clear_cookies.sh
 
-# 8. Create comprehensive test file
-cat > test.py << 'TESTPY_EOF'
-#!/usr/bin/env python3
-# Comprehensive test
-
-import sys
-import os
-import subprocess
-import json
-
-print("🔧 Testing Enhanced Installation...")
-print("=" * 50)
-
-# Check Python
-try:
-    import platform
-    print(f"✅ Python {platform.python_version()}")
-except:
-    print("❌ Python error")
-    sys.exit(1)
-
-# Check packages
-packages = ["telegram", "dotenv", "json", "re", "asyncio"]
-for pkg in packages:
-    try:
-        __import__(pkg)
-        print(f"✅ {pkg}")
-    except ImportError as e:
-        print(f"❌ {pkg}: {e}")
-
-# Check .env
-if os.path.exists(".env"):
-    with open(".env", "r") as f:
-        content = f.read()
-        if "BOT_TOKEN=" in content:
-            print("✅ .env with BOT_TOKEN")
-        else:
-            print("❌ .env missing BOT_TOKEN")
-else:
-    print("❌ .env missing")
-
-# Check yt-dlp CLI
-result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
-if result.returncode == 0:
-    version = result.stdout.strip()
-    print(f"✅ yt-dlp CLI: {version}")
-else:
-    print("❌ yt-dlp CLI not working")
-
-# Check directories
-directories = ["downloads", "logs", "cookies", "venv"]
-for dir in directories:
-    if os.path.exists(dir):
-        print(f"✅ Directory: {dir}")
-    else:
-        print(f"⚠️ Missing: {dir}")
-
-# Check supported platforms
-supported_platforms = [
-    "TikTok", "Facebook", "YouTube", "Instagram",
-    "Twitter/X", "Reddit", "Pinterest", "Likee",
-    "Twitch", "Dailymotion", "Streamable", "Vimeo",
-    "Rumble", "Bilibili", "TED",
-    "Aparat", "Namava", "Filimo", "Tiva"
-]
-
-print("\n📋 Supported Platforms:")
-for platform in supported_platforms:
-    print(f"   ✅ {platform}")
-
-print("\n✨ Features:")
-print("   ✅ Quality selection before download")
-print("   ✅ File size display for each quality")
-print("   ✅ Support for all requested platforms")
-print("   ✅ Iranian platforms support")
-print("   ✅ Cookie support for private videos")
-print("   ✅ Max 50MB file size limit")
-
-print("=" * 50)
-print("🎉 Enhanced Setup Complete!")
-print("\n🚀 To start: ./start.sh")
-print("🛑 To stop:  ./stop.sh")
-print("🔄 To restart: ./restart.sh")
-print("🍪 To clear cookies: ./clear_cookies.sh")
-print("\n💡 Tip: Add cookies.txt to cookies/ folder for better quality on some platforms!")
-TESTPY_EOF
-
-chmod +x test.py
-
-# 9. Create enhanced requirements.txt
-cat > requirements.txt << 'REQS_EOF'
+# 9. فایل requirements.txt ایجاد کنید
+cat > requirements.txt << 'EOF'
 python-telegram-bot==20.7
 python-dotenv==1.0.0
-REQS_EOF
+EOF
 
-# 10. Create README
-cat > README.md << 'README_EOF'
-# Enhanced Telegram Downloader Bot
-
-Advanced bot for downloading videos from multiple social media platforms with quality selection.
-
-## ✨ Features
-
-- **Quality Selection**: Choose quality before downloading
-- **File Size Display**: See size for each quality option
-- **Multi-Platform Support**: 20+ platforms supported
-- **Iranian Platforms**: Aparat, Namava, Filimo, Tiva
-- **Cookie Support**: Login cookies for private videos
-- **Video Info**: Title, uploader, duration, views, likes
-
-## 📋 Supported Platforms
-
-### Main Platforms
-- TikTok, Douyin
-- Facebook, Instagram
-- YouTube, Twitter/X
-- Reddit, Pinterest
-- Likee, Twitch
-- Dailymotion, Streamable
-- Vimeo, Rumble
-- Bilibili, TED
-
-### Iranian Platforms
-- Aparat
-- Namava  
-- Filimo
-- Tiva
-
-## 🚀 Installation
-
-1. Run the setup script:
-```bash
-bash install.sh
+# 10. تست کنید
+echo "🎉 Setup Complete!"
+echo ""
+echo "📁 Files created:"
+ls -la
+echo ""
+echo "🚀 To start bot: ./start.sh"
+echo "🛑 To stop bot: ./stop.sh"
+echo "🔄 To restart: ./restart.sh"
+echo ""
+echo "✨ Features:"
+echo "✅ Quality selection before download"
+echo "✅ File size display for each quality"
+echo "✅ Supports 20+ platforms including Iranian platforms"
+echo "✅ Cookie support for private videos"
+echo "✅ Max 50MB file size"
+echo ""
+echo "📱 Supported Platforms:"
+echo "• TikTok, Facebook, YouTube, Instagram"
+echo "• Twitter/X, Reddit, Pinterest, Likee"
+echo "• Twitch, Dailymotion, Streamable, Vimeo"
+echo "• Rumble, Bilibili, TED"
+echo "• Aparat, Namava, Filimo, Tiva (Iranian)"
+echo ""
+echo "🤖 Bot is ready! Run ./start.sh to start"
