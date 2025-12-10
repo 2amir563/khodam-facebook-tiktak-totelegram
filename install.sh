@@ -1,146 +1,128 @@
 #!/bin/bash
-# ============================================
-# Telegram Media Downloader Bot - SMART INSTALLER
-# با تشخیص خودکار سایت‌های کارآمد و ارائه راهنمای کوکی
-# ============================================
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers
+# Compatible with Ubuntu/Debian fresh installations
 
-set -e  # خروج در صورت خطا
+set -e  # Exit on error
 
 echo "=============================================="
-echo "🤖 بات دانلود مدیا تلگرام - نسخه هوشمند"
+echo "🤖 Telegram Media Downloader Bot"
 echo "=============================================="
 echo ""
 
-# بررسی دسترسی root
+# Check root
 if [ "$EUID" -ne 0 ]; then 
-    echo "❌ لطفاً با دسترسی root اجرا کنید: sudo bash install.sh"
+    echo "❌ Please run as root: sudo bash install.sh"
     exit 1
 fi
 
-# رنگ‌ها
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # بدون رنگ
+NC='\033[0m'
 
 print_status() { echo -e "${GREEN}[✓]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 print_error() { echo -e "${RED}[✗]${NC} $1"; }
 print_info() { echo -e "${BLUE}[i]${NC} $1"; }
 
-# دریافت توکن بات
-echo "🔑 توکن بات خود را از @BotFather وارد کنید:"
-echo "مثال: 1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ"
-echo ""
-read -p "📝 توکن بات: " BOT_TOKEN
+# Ask for bot token
+echo "🔑 Enter your bot token from @BotFather:"
+read -p "📝 Bot token: " BOT_TOKEN
 
 if [ -z "$BOT_TOKEN" ]; then
-    print_error "وارد کردن توکن بات الزامی است!"
+    print_error "Bot token is required!"
     exit 1
 fi
 
-print_status "شروع نصب بر روی سرور خام..."
+print_status "Starting installation on fresh server..."
 
 # ============================================
-# مرحله ۱: به‌روزرسانی سیستم و نصب ابزارهای پایه
+# STEP 1: System Update
 # ============================================
-print_status "به‌روزرسانی پکیج‌های سیستم..."
+print_status "Updating system packages..."
 apt-get update
 apt-get upgrade -y
 
-print_status "نصب ابزارهای ضروری سیستم..."
-apt-get install -y \
-    curl \
-    wget \
-    nano \
-    screen \
-    unzip \
-    pv
+print_status "Installing essential tools..."
+apt-get install -y curl wget nano htop screen unzip pv
 
 # ============================================
-# مرحله ۲: بررسی و نصب پایتون و pip
+# STEP 2: Install Python and Dependencies
 # ============================================
-print_status "بررسی نصب پایتون..."
+print_status "Checking Python installation..."
 
+# Install Python if not exists
 if ! command -v python3 &> /dev/null; then
-    print_status "پایتون ۳ یافت نشد. در حال نصب..."
-    apt-get install -y python3
+    print_status "Installing Python3..."
+    apt-get install -y python3 python3-pip
 fi
 
-if ! command -v pip3 &> /dev/null; then
-    print_status "pip3 یافت نشد. در حال نصب..."
-    apt-get install -y python3-pip
-fi
+# Check Python version
+PYTHON_VERSION=$(python3 --version 2>&1)
+print_status "Found $PYTHON_VERSION"
 
-# نصب ffmpeg برای پردازش ویدیو
-print_status "نصب ffmpeg..."
+# Install FFmpeg
+print_status "Installing FFmpeg..."
 apt-get install -y ffmpeg
 
 # ============================================
-# مرحله ۳: ایجاد ساختار پروژه
+# STEP 3: Create Project Structure
 # ============================================
-print_status "ایجاد دایرکتوری پروژه..."
+print_status "Creating project directory..."
 INSTALL_DIR="/opt/telegram-media-bot"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# ایجاد دایرکتوری‌های مورد نیاز
+# Create directories
 mkdir -p downloads logs cookies tmp
 chmod 755 downloads logs cookies tmp
 
 # ============================================
-# مرحله ۴: نصب پکیج‌های پایتون
+# STEP 4: Install Python Packages
 # ============================================
-print_status "نصب پکیج‌های پایتون..."
+print_status "Installing Python packages..."
 
-# ایجاد فایل requirements
-cat > requirements.txt << 'EOF'
+# Create requirements file
+cat > requirements.txt << 'REQEOF'
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 yt-dlp==2024.4.9
 aiofiles==23.2.1
 requests==2.31.0
-EOF
+REQEOF
 
-# نصب با استفاده از pip
-python3 -m pip install --upgrade pip --quiet
-python3 -m pip install -r requirements.txt --quiet
+# Install packages
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 
-print_status "✅ پکیج‌های اصلی با موفقیت نصب شدند"
+print_status "✅ Core packages installed"
 
 # ============================================
-# مرحله ۵: ایجاد فایل‌های پیکربندی
+# STEP 5: Create Configuration
 # ============================================
-print_status "ایجاد فایل‌های پیکربندی..."
+print_status "Creating configuration files..."
 
-# ایجاد فایل .env با توکن بات
-cat > .env << EOF
-# تنظیمات بات تلگرام
+# Create .env file
+cat > .env << ENVEOF
 BOT_TOKEN=${BOT_TOKEN}
-
-# تنظیمات سرور
-MAX_FILE_SIZE=2000  # مگابایت
+MAX_FILE_SIZE=2000
 DELETE_AFTER_MINUTES=2
-CONCURRENT_DOWNLOADS=1
+ENVEOF
 
-# تنظیمات بات
-ENABLE_QUALITY_SELECTION=false
-AUTO_CLEANUP=true
-EOF
-
-print_status "✅ فایل .env با توکن بات ایجاد شد"
+print_status "✅ Configuration created"
 
 # ============================================
-# مرحله ۶: ایجاد فایل اصلی بات (هوشمند)
+# STEP 6: Create Bot File
 # ============================================
-print_status "ایجاد فایل اصلی بات (نسخه هوشمند)..."
+print_status "Creating bot main file..."
 
-cat > bot.py << 'EOF'
+cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-بات هوشمند دانلود مدیا تلگرام
-با تشخیص خودکار سایت‌های کارآمد و راهنمای کوکی
+Simple Telegram Media Downloader Bot
+Works on fresh servers
 """
 
 import os
@@ -151,31 +133,24 @@ import asyncio
 import re
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse
 
 from telegram import Update
-from telegram.ext import (
-    Application, 
-    CommandHandler, 
-    MessageHandler, 
-    filters, 
-    ContextTypes
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from dotenv import load_dotenv
 
-# بارگذاری متغیرهای محیطی
+# Load config
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DELETE_AFTER = int(os.getenv("DELETE_AFTER_MINUTES", "2"))
 MAX_SIZE_MB = int(os.getenv("MAX_FILE_SIZE", "2000"))
 
 if not BOT_TOKEN:
-    print("❌ خطا: BOT_TOKEN در فایل .env یافت نشد")
-    print("لطفاً فایل .env را ویرایش کنید و توکن بات را اضافه کنید")
+    print("ERROR: BOT_TOKEN not found in .env")
     sys.exit(1)
 
-# راه‌اندازی لاگ‌گیری
+# Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -186,58 +161,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# دسته‌بندی سایت‌ها بر اساس قابلیت دانلود
-SITE_CATEGORIES = {
-    "working": {
-        "sites": ["streamable.com", "dai.ly", "twitch.tv"],
-        "description": "✅ بدون نیاز به کوکی کار می‌کنند"
-    },
-    "needs_cookies": {
-        "sites": ["pinterest.com", "pin.it", "reddit.com", "rumble.com"],
-        "description": "🍪 نیاز به فایل cookies.txt دارند"
-    },
-    "needs_special_config": {
-        "sites": ["bilibili.com", "vimeo.com", "ted.com"],
-        "description": "⚙️ نیاز به تنظیمات خاص دارند"
-    }
-}
-
-def categorize_site(url):
-    """دسته‌بندی سایت بر اساس URL"""
-    for category, info in SITE_CATEGORIES.items():
-        for site in info["sites"]:
-            if site in url.lower():
-                return category, site
-    return "unknown", "سایت ناشناخته"
-
 def clean_url(text):
-    """استخراج و تمیز کردن URL از متن"""
+    """Extract URL from text"""
     if not text:
         return None
     
     text = text.strip()
-    
-    # الگوی پیدا کردن URL
-    url_pattern = r'(https?://[^\s<>"\']+|www\.[^\s<>"\']+\.[a-z]{2,})'
+    url_pattern = r'https?://[^\s<>"\']+'
     matches = re.findall(url_pattern, text, re.IGNORECASE)
     
     if matches:
-        url = matches[0]
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        
-        # تمیز کردن URL
-        url = re.sub(r'[.,;:!?]+$', '', url)
-        url = unquote(url)
-        
-        return url
-    
+        return matches[0]
     return None
 
 def format_size(bytes_val):
-    """فرمت‌بندی حجم فایل به صورت قابل خواندن"""
-    if bytes_val is None:
-        return "نامشخص"
+    """Format file size"""
+    if not bytes_val:
+        return "Unknown"
     
     try:
         bytes_val = float(bytes_val)
@@ -247,10 +187,10 @@ def format_size(bytes_val):
             bytes_val /= 1024.0
         return f"{bytes_val:.1f} TB"
     except:
-        return "نامشخص"
+        return "Unknown"
 
-async def download_for_working_sites(url, output_path):
-    """دانلود برای سایت‌هایی که بدون کوکی کار می‌کنند"""
+async def download_video(url, output_path):
+    """Download video using yt-dlp"""
     try:
         cmd = [
             "yt-dlp",
@@ -259,11 +199,8 @@ async def download_for_working_sites(url, output_path):
             "--no-warnings",
             "--ignore-errors",
             "--no-playlist",
-            "--concurrent-fragments", "1",
             url
         ]
-        
-        logger.info(f"در حال دانلود از سایت کارآمد: {' '.join(cmd[:8])}...")
         
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -271,177 +208,253 @@ async def download_for_working_sites(url, output_path):
             stderr=subprocess.PIPE
         )
         
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=180)
-        except asyncio.TimeoutError:
-            process.kill()
-            return False, "وقفه (۳ دقیقه)"
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=180)
         
         if process.returncode == 0:
-            return True, "دانلود موفق"
+            return True, "Success"
         else:
             error = stderr.decode('utf-8', errors='ignore')[:200]
-            return False, f"خطا: {error}"
+            return False, f"Error: {error}"
             
+    except asyncio.TimeoutError:
+        return False, "Timeout (3 minutes)"
     except Exception as e:
-        return False, f"خطای دستور: {str(e)}"
+        return False, f"Error: {str(e)}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پردازش دستور /start"""
+    """Handle /start command"""
     welcome = """
-🤖 *بات هوشمند دانلود مدیا تلگرام*
+🤖 *Media Downloader Bot*
 
-🎯 *سایت‌های تأیید شده (بدون نیاز به کوکی):*
-✅ Streamable (streamable.com)
-✅ Dailymotion (dai.ly)  
-✅ Twitch clips (twitch.tv)
+✅ *Working Sites:*
+• Streamable (streamable.com)
+• Dailymotion (dai.ly)
+• Twitch clips (twitch.tv)
 
-⚠️ *سایت‌های نیازمند کوکی:*
-🍪 Pinterest (pinterest.com, pin.it)
-🍪 Reddit (reddit.com)
-🍪 Rumble (rumble.com)
+📝 *How to use:*
+1. Send a video URL
+2. Bot downloads and sends it
+3. File auto-deletes after 2 minutes
 
-⚡ *ویژگی‌های بات:*
-• دانلود خودکار از سایت‌های کارآمد
-• راهنمای کامل برای سایت‌های نیازمند کوکی
-• محدودیت حجم فایل: ۲۰۰۰ مگابایت
-• حذف خودکار پس از ۲ دقیقه
-
-📝 *نحوه استفاده:*
-۱. یک لینک مدیا ارسال کنید
-۲. بات نوع سایت را تشخیص می‌دهد
-۳. در صورت نیاز راهنمای کوکی دریافت می‌کنید
-۴. برای سایت‌های کارآمد، فایل دانلود می‌شود
+⚡ *Features:*
+• Max file size: 2000MB
+• Auto cleanup
+• Simple and fast
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پردازش لینک‌های ارسالی"""
-    original_text = update.message.text
-    url = clean_url(original_text)
+    """Handle URL messages"""
+    url = clean_url(update.message.text)
     
     if not url:
-        await update.message.reply_text(
-            "❌ *لینک معتبری یافت نشد*\nلطفاً یک لینک با http:// یا https:// ارسال کنید",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        await update.message.reply_text("❌ Please send a valid URL starting with http:// or https://")
         return
     
-    # تشخیص نوع سایت
-    category, site_name = categorize_site(url)
+    # Get site name
+    parsed = urlparse(url)
+    site = parsed.netloc.replace('www.', '')
     
-    if category == "working":
-        # سایت‌های کارآمد - مستقیم دانلود می‌شوند
-        msg = await update.message.reply_text(
-            f"🔗 *سایت کارآمد شناسایی شد*\n\n"
-            f"سایت: *{site_name}*\n"
-            f"وضعیت: ✅ بدون نیاز به کوکی\n\n"
-            f"در حال دانلود...",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        # تولید نام فایل
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = re.sub(r'[^\w\-_]', '_', url[:30])
-        filename = f"{safe_name}_{timestamp}"
-        output_template = f"downloads/{filename}.%(ext)s"
-        
-        # دانلود
-        success, result = await download_for_working_sites(url, output_template)
-        
-        if not success:
-            await msg.edit_text(
-                f"❌ *دانلود ناموفق*\n\n"
-                f"سایت: {site_name}\n"
-                f"خطا: {result}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        # پیدا کردن فایل دانلود شده
-        downloaded_files = list(Path("downloads").glob(f"{filename}.*"))
-        if not downloaded_files:
-            await msg.edit_text(
-                "❌ دانلود کامل شد اما فایل یافت نشد",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        file_path = downloaded_files[0]
-        file_size = file_path.stat().st_size
-        
-        # بررسی حجم
-        if file_size > (MAX_SIZE_MB * 1024 * 1024):
-            file_path.unlink()
-            await msg.edit_text(
-                f"❌ *حجم فایل بسیار زیاد*\n\n"
-                f"حجم: {format_size(file_size)}\n"
-                f"حداکثر مجاز: {MAX_SIZE_MB}MB",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        # آپلود به تلگرام
-        await msg.edit_text(
-            f"📤 *در حال آپلود...*\n\n"
-            f"فایل: {file_path.name}\n"
-            f"حجم: {format_size(file_size)}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        try:
-            with open(file_path, 'rb') as file:
-                await update.message.reply_video(
-                    video=file,
-                    caption=f"✅ *دانلود کامل شد!*\n\n"
-                           f"سایت: {site_name}\n"
-                           f"حجم: {format_size(file_size)}\n"
-                           f"حذف خودکار پس از {DELETE_AFTER} دقیقه",
-                    parse_mode=ParseMode.MARKDOWN,
-                    supports_streaming=True
-                )
-            
-            await msg.edit_text(
-                f"🎉 *موفقیت!*\n\n"
-                f"✅ فایل دانلود و ارسال شد!\n"
-                f"📊 حجم: {format_size(file_size)}\n"
-                f"⏰ حذف خودکار پس از {DELETE_AFTER} دقیقه",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            
-            # زمان‌بندی حذف فایل
-            async def delete_file():
-                await asyncio.sleep(DELETE_AFTER * 60)
-                if file_path.exists():
-                    file_path.unlink()
-                    logger.info(f"فایل حذف شد: {file_path.name}")
-            
-            asyncio.create_task(delete_file())
-            
-        except Exception as upload_error:
-            logger.error(f"خطای آپلود: {upload_error}")
-            await msg.edit_text(
-                f"❌ *خطای آپلود*\n\n{str(upload_error)[:200]}",
-                parse_mode=ParseMode.MARKDOWN
-            )
+    # Initial message
+    msg = await update.message.reply_text(f"🔗 Processing: {site}\n\nDownloading...")
     
-    elif category == "needs_cookies":
-        # سایت‌های نیازمند کوکی - راهنمای کامل
-        cookie_guide = f"""
-🍪 *سایت نیازمند کوکی شناسایی شد*
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"downloads/video_{timestamp}.mp4"
+    
+    # Download
+    success, result = await download_video(url, filename)
+    
+    if not success:
+        await msg.edit_text(f"❌ Download failed:\n{result}")
+        return
+    
+    # Check if file exists
+    if not Path(filename).exists():
+        await msg.edit_text("❌ File not found after download")
+        return
+    
+    file_path = Path(filename)
+    file_size = file_path.stat().st_size
+    
+    # Check size
+    if file_size > (MAX_SIZE_MB * 1024 * 1024):
+        file_path.unlink()
+        await msg.edit_text(f"❌ File too large: {format_size(file_size)}")
+        return
+    
+    # Upload to Telegram
+    await msg.edit_text("📤 Uploading...")
+    
+    try:
+        with open(file_path, 'rb') as file:
+            await update.message.reply_video(
+                video=file,
+                caption=f"✅ Downloaded from {site}\nSize: {format_size(file_size)}",
+                supports_streaming=True
+            )
+        
+        await msg.edit_text(f"✅ Success! File sent.\nSize: {format_size(file_size)}")
+        
+        # Auto delete
+        async def delete_file():
+            await asyncio.sleep(DELETE_AFTER * 60)
+            if file_path.exists():
+                file_path.unlink()
+        
+        asyncio.create_task(delete_file())
+        
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        await msg.edit_text(f"❌ Upload failed: {str(e)[:200]}")
 
-سایت: *{site_name}*
-وضعیت: 🔒 نیاز به احراز هویت
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    help_text = """
+🆘 *Help Guide*
 
-📋 *مراحل راه‌اندازی کوکی:*
+Send video URLs from:
+• Streamable (streamable.com)
+• Dailymotion (dai.ly)
+• Twitch clips (twitch.tv)
 
-۱. *روی کامپیوتر شخصی:*
-   • افزونه «Get cookies.txt» را در کروم/فایرفاکس نصب کنید
-   • به سایت {site_name} بروید و وارد حساب خود شوید
-   • روی افزونه کلیک کنید → Export cookies
-   • فایل را با نام `cookies.txt` ذخیره کنید
+Examples:
+• https://streamable.com/2ipg1n
+• https://dai.ly/x7rx1hr
+• https://twitch.tv/clip/example
 
-۲. *آپلود به سرور:*
-```bash
-# در ترمینال کامپیوتر شخصی
-scp cookies.txt root@آیپی-سرور:/opt/telegram-media-bot/cookies/
+Note: Some sites need cookies. For Pinterest/Reddit, you need to add cookies.txt file.
+"""
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors"""
+    logger.error(f"Error: {context.error}")
+
+def main():
+    """Main function"""
+    print("=" * 60)
+    print("🤖 Telegram Media Downloader Bot")
+    print("=" * 60)
+    
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_error_handler(error_handler)
+    
+    print("✅ Bot starting...")
+    print("📱 Send /start to your bot")
+    
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
+PYEOF
+
+# Make bot executable
+chmod +x bot.py
+
+# ============================================
+# STEP 7: Create Systemd Service
+# ============================================
+print_status "Creating systemd service..."
+
+cat > /etc/systemd/system/telegram-media-bot.service << SERVICEEOF
+[Unit]
+Description=Telegram Media Downloader Bot
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=/opt/telegram-media-bot
+ExecStart=/usr/bin/python3 /opt/telegram-media-bot/bot.py
+StandardOutput=append:/opt/telegram-media-bot/logs/bot.log
+StandardError=append:/opt/telegram-media-bot/logs/bot-error.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+systemctl daemon-reload
+systemctl enable telegram-media-bot.service
+
+# ============================================
+# STEP 8: Create Management Scripts
+# ============================================
+print_status "Creating management scripts..."
+
+cat > start-bot.sh << 'EOF'
+#!/bin/bash
+cd /opt/telegram-media-bot
+python3 bot.py
+EOF
+
+cat > stop-bot.sh << 'EOF'
+#!/bin/bash
+systemctl stop telegram-media-bot.service
+echo "Bot stopped"
+EOF
+
+cat > restart-bot.sh << 'EOF'
+#!/bin/bash
+systemctl restart telegram-media-bot.service
+echo "Bot restarted"
+EOF
+
+cat > bot-status.sh << 'EOF'
+#!/bin/bash
+systemctl status telegram-media-bot.service
+EOF
+
+cat > bot-logs.sh << 'EOF'
+#!/bin/bash
+tail -f /opt/telegram-media-bot/logs/bot.log
+EOF
+
+chmod +x *.sh
+
+# ============================================
+# STEP 9: Start Service
+# ============================================
+print_status "Starting bot service..."
+systemctl start telegram-media-bot.service
+sleep 3
+
+# ============================================
+# STEP 10: Show Final Instructions
+# ============================================
+echo ""
+echo "=============================================="
+echo "🎉 INSTALLATION COMPLETE"
+echo "=============================================="
+echo "📁 Directory: /opt/telegram-media-bot"
+echo "🤖 Bot token saved in: .env"
+echo "📝 Logs: logs/bot.log"
+echo ""
+echo "🚀 TO START USING:"
+echo "1. Go to Telegram"
+echo "2. Find your bot"
+echo "3. Send /start"
+echo "4. Send a URL from:"
+echo "   • streamable.com"
+echo "   • dai.ly"
+echo "   • twitch.tv/clips"
+echo ""
+echo "⚙️ MANAGEMENT:"
+echo "cd /opt/telegram-media-bot"
+echo "./start-bot.sh    # Start"
+echo "./stop-bot.sh     # Stop"
+echo "./restart-bot.sh  # Restart"
+echo "./bot-status.sh   # Status"
+echo "./bot-logs.sh     # Logs"
+echo ""
+echo "🐛 TROUBLESHOOTING:"
+echo "tail -f logs/bot.log"
+echo "systemctl status telegram-media-bot"
+echo "=============================================="
