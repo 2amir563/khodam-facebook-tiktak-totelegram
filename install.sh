@@ -1,3 +1,5 @@
+# 1. فایل را دانلود یا ایجاد کنید
+cat > install_enhanced.sh << 'INSTALL_EOF'
 #!/bin/bash
 
 # =========================================================
@@ -58,7 +60,8 @@ echo -e "${GREEN}✅ Token saved${NC}"
 # 6. Create enhanced bot.py with quality selection
 echo -e "${YELLOW}📝 Creating enhanced bot.py with quality selection...${NC}"
 
-cat << 'EOF' > $BOT_FILE
+# First create a separate file for bot.py
+cat > $BOT_FILE << 'BOTPY_EOF'
 #!/usr/bin/env python3
 """
 Enhanced Telegram Downloader Bot with Quality Selection
@@ -892,7 +895,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-EOF
+BOTPY_EOF
 
 # Make executable
 chmod +x $BOT_FILE
@@ -901,26 +904,26 @@ chmod +x $BOT_FILE
 echo -e "${YELLOW}📁 Creating enhanced scripts...${NC}"
 
 # Start script
-cat << 'EOF' > start.sh
+cat > start.sh << 'START_EOF'
 #!/bin/bash
 # Start the enhanced bot
 
 echo "🚀 Starting Enhanced Downloader Bot..."
 source venv/bin/activate
 python3 bot.py
-EOF
+START_EOF
 
 # Stop script
-cat << 'EOF' > stop.sh
+cat > stop.sh << 'STOP_EOF'
 #!/bin/bash
 # Stop the bot
 
 echo "🛑 Stopping bot..."
 pkill -f "python3 bot.py" 2>/dev/null && echo "✅ Bot stopped" || echo "⚠️ Bot not running"
-EOF
+STOP_EOF
 
 # Restart script
-cat << 'EOF' > restart.sh
+cat > restart.sh << 'RESTART_EOF'
 #!/bin/bash
 # Restart bot
 
@@ -928,23 +931,23 @@ echo "🔄 Restarting Enhanced Bot..."
 ./stop.sh
 sleep 2
 ./start.sh
-EOF
+RESTART_EOF
 
 # Clear cookies script
-cat << 'EOF' > clear_cookies.sh
+cat > clear_cookies.sh << 'CLEARCOOKIES_EOF'
 #!/bin/bash
 # Clear cookies
 
 echo "🧹 Clearing cookies..."
 rm -f cookies/cookies.txt 2>/dev/null
 echo "✅ Cookies cleared"
-EOF
+CLEARCOOKIES_EOF
 
 # Make scripts executable
 chmod +x start.sh stop.sh restart.sh clear_cookies.sh
 
 # 8. Create comprehensive test file
-cat << 'EOF' > test.py
+cat > test.py << 'TESTPY_EOF'
 #!/usr/bin/env python3
 # Comprehensive test
 
@@ -1028,18 +1031,18 @@ print("🛑 To stop:  ./stop.sh")
 print("🔄 To restart: ./restart.sh")
 print("🍪 To clear cookies: ./clear_cookies.sh")
 print("\n💡 Tip: Add cookies.txt to cookies/ folder for better quality on some platforms!")
-EOF
+TESTPY_EOF
 
 chmod +x test.py
 
 # 9. Create enhanced requirements.txt
-cat << 'EOF' > requirements.txt
+cat > requirements.txt << 'REQS_EOF'
 python-telegram-bot==20.7
 python-dotenv==1.0.0
-EOF
+REQS_EOF
 
 # 10. Create README
-cat << 'EOF' > README.md
+cat > README.md << 'README_EOF'
 # Enhanced Telegram Downloader Bot
 
 Advanced bot for downloading videos from multiple social media platforms with quality selection.
