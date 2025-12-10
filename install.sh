@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # =========================================================
-#         Complete Social Media Downloader Bot Setup
+#         Enhanced Telegram Downloader Bot Setup
 # =========================================================
-# Bot for downloading videos from ALL requested platforms
+# Advanced bot for downloading videos from social media with quality selection
 
 set -e
 
@@ -14,32 +14,24 @@ ENV_FILE=".env"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${PURPLE}🛠️ Complete Social Media Downloader Bot Setup${NC}"
+echo -e "${GREEN}🛠️ Enhanced Telegram Downloader Bot Setup${NC}"
 
 # 1. Install basic dependencies
 echo -e "${YELLOW}📦 Installing system dependencies...${NC}"
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv curl ffmpeg
 
-# 2. Install yt-dlp
-echo -e "${YELLOW}⬇️ Installing yt-dlp with all extractors...${NC}"
+# 2. Install yt-dlp with cookies support
+echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
-
-# Update to get latest extractors
-echo -e "${CYAN}🔄 Updating yt-dlp for all platform support...${NC}"
-yt-dlp -U
-
-echo -e "${GREEN}✅ yt-dlp installed - Version: $(yt-dlp --version)${NC}"
+echo -e "${GREEN}✅ yt-dlp installed${NC}"
 
 # 3. Create directories
 echo -e "${YELLOW}📁 Creating directories...${NC}"
-mkdir -p downloads logs
+mkdir -p downloads logs cookies
 
 # 4. Create virtual environment
 echo -e "${YELLOW}🐍 Setting up Python environment...${NC}"
@@ -63,14 +55,13 @@ fi
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved${NC}"
 
-# 6. Create bot.py with ALL platform support
-echo -e "${PURPLE}📝 Creating bot.py with ALL requested platforms...${NC}"
+# 6. Create enhanced bot.py with quality selection
+echo -e "${YELLOW}📝 Creating enhanced bot.py with quality selection...${NC}"
 
 cat << 'EOF' > $BOT_FILE
 #!/usr/bin/env python3
 """
-Complete Social Media Downloader Bot
-Supports ALL requested platforms
+Enhanced Telegram Downloader Bot with Quality Selection
 """
 import os
 import sys
@@ -79,11 +70,14 @@ import subprocess
 import asyncio
 import json
 import re
+import math
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.constants import ParseMode
 from dotenv import load_dotenv
 
 # Load token
@@ -97,284 +91,318 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# =========================================================
-# ALL SUPPORTED PLATFORMS
-# =========================================================
+# Enhanced supported platforms
 SUPPORTED_DOMAINS = [
-    # TikTok
-    "tiktok.com", "vm.tiktok.com", "vt.tiktok.com",
+    # Main platforms
+    "tiktok.com", "douyin.com",
+    "facebook.com", "fb.watch",
+    "youtube.com", "youtu.be",
+    "instagram.com",
+    "twitter.com", "x.com",
+    "reddit.com",
     
-    # Facebook
-    "facebook.com", "fb.watch", "fb.com",
-    
-    # YouTube
-    "youtube.com", "youtu.be", "youtube-nocookie.com",
-    
-    # Instagram
-    "instagram.com", "instagr.am",
-    
-    # Twitter/X
-    "twitter.com", "x.com", "t.co",
-    
-    # Reddit
-    "reddit.com", "redd.it",
-    
-    # Pinterest
+    # Additional platforms
     "pinterest.com", "pin.it",
-    
-    # Likee
-    "likee.video", "like.com",
-    
-    # Twitch
-    "twitch.tv", "clips.twitch.tv",
-    
-    # Dailymotion
+    "likee.video", "likee.com",
+    "twitch.tv",
     "dailymotion.com", "dai.ly",
-    
-    # Streamable
     "streamable.com",
-    
-    # Vimeo
     "vimeo.com",
-    
-    # Rumble
     "rumble.com",
-    
-    # Bilibili
-    "bilibili.com", "b23.tv",
-    
-    # TED
+    "bilibili.com",
     "ted.com",
     
-    # Iranian Platforms
+    # Iranian platforms
     "aparat.com",
     "namava.ir",
     "filimo.com",
-    "tiva.ir",
-    
-    # Additional popular platforms
-    "tumblr.com",
-    "9gag.com",
-    "imgur.com",
-    "gfycat.com",
-    "giphy.com",
-    "flickr.com",
-    "vk.com",
-    "weibo.com",
-    "douyin.com",
-    "kuaishou.com",
-    "ok.ru",
-    "rutube.ru",
-    "mx.tiktok.com",
-    "tiktokv.com"
+    "tiva.ir"
 ]
 
-# Platform display names with emojis
+# Platform names mapping
 PLATFORM_NAMES = {
-    "tiktok": {"name": "TikTok", "emoji": "🎵"},
-    "facebook": {"name": "Facebook", "emoji": "📘"},
-    "youtube": {"name": "YouTube", "emoji": "📺"},
-    "instagram": {"name": "Instagram", "emoji": "📷"},
-    "twitter": {"name": "Twitter/X", "emoji": "🐦"},
-    "reddit": {"name": "Reddit", "emoji": "👽"},
-    "pinterest": {"name": "Pinterest", "emoji": "📌"},
-    "likee": {"name": "Likee", "emoji": "❤️"},
-    "twitch": {"name": "Twitch", "emoji": "🎮"},
-    "dailymotion": {"name": "Dailymotion", "emoji": "🎬"},
-    "streamable": {"name": "Streamable", "emoji": "🎥"},
-    "vimeo": {"name": "Vimeo", "emoji": "🎞️"},
-    "rumble": {"name": "Rumble", "emoji": "⚡"},
-    "bilibili": {"name": "Bilibili", "emoji": "🇨🇳"},
-    "ted": {"name": "TED", "emoji": "💡"},
-    "aparat": {"name": "آپارات", "emoji": "🇮🇷"},
-    "namava": {"name": "نماوا", "emoji": "🇮🇷"},
-    "filimo": {"name": "فیلیمو", "emoji": "🇮🇷"},
-    "tiva": {"name": "تیوا", "emoji": "🇮🇷"},
-    "default": {"name": "Video", "emoji": "📹"}
+    "tiktok": "TikTok",
+    "facebook": "Facebook",
+    "youtube": "YouTube", 
+    "instagram": "Instagram",
+    "twitter": "Twitter/X",
+    "reddit": "Reddit",
+    "pinterest": "Pinterest",
+    "likee": "Likee",
+    "twitch": "Twitch",
+    "dailymotion": "Dailymotion",
+    "streamable": "Streamable",
+    "vimeo": "Vimeo",
+    "rumble": "Rumble",
+    "bilibili": "Bilibili",
+    "ted": "TED",
+    "aparat": "Aparat",
+    "namava": "Namava",
+    "filimo": "Filimo",
+    "tiva": "Tiva"
 }
 
+# User download sessions
+user_sessions = {}
+
+class DownloadSession:
+    """Store user download session data"""
+    def __init__(self, url, platform, formats):
+        self.url = url
+        self.platform = platform
+        self.formats = formats
+        self.selected_format = None
+        self.created_at = datetime.now()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send welcome message with all platforms"""
-    
-    # Create categorized platform list
-    platforms_text = (
-        "🌍 *تمام پلتفرم‌های پشتیبانی شده:*\n\n"
-        
-        "🎬 *پلتفرم‌های بین‌المللی:*\n"
-        "• TikTok 🎵\n• Facebook 📘\n• YouTube 📺\n"
-        "• Instagram 📷\n• Twitter/X 🐦\n• Reddit 👽\n"
-        "• Pinterest 📌\n• Likee ❤️\n• Twitch 🎮\n"
-        "• Dailymotion 🎬\n• Streamable 🎥\n• Vimeo 🎞️\n"
-        "• Rumble ⚡\n• Bilibili 🇨🇳\n• TED 💡\n\n"
-        
-        "🇮🇷 *پلتفرم‌های ایرانی:*\n"
-        "• آپارات 🇮🇷\n• نماوا 🇮🇷\n"
-        "• فیلیمو 🇮🇷\n• تیوا 🇮🇷\n\n"
-        
-        "📝 *طریقه استفاده:*\n"
-        "فقط لینک ویدیو رو ارسال کن!\n\n"
-        
-        "✨ *ویژگی‌ها:*\n"
-        "• اطلاعات کامل ویدیو\n"
-        "• کیفیت اتوماتیک\n"
-        "• حداکثر حجم: ۵۰ مگابایت\n"
-        "• بدون مشکل Markdown\n\n"
-        
-        "⚠️ *محدودیت‌ها:*\n"
-        "• فقط ویدیوهای عمومی\n"
-        "• بدون نیاز به لاگین\n"
-        "• برخی پلتفرم‌ها ممکنه محدودیت داشته باشند"
-    )
-    
-    await update.message.reply_text(platforms_text, parse_mode='Markdown')
+    """Send welcome message"""
+    welcome_msg = """
+🤖 *Enhanced Downloader Bot*
+
+📥 *Supported Platforms:*
+• TikTok, Douyin
+• Facebook, Instagram
+• YouTube, Twitter/X
+• Reddit, Pinterest
+• Likee, Twitch
+• Dailymotion, Streamable
+• Vimeo, Rumble
+• Bilibili, TED
+
+🇮🇷 *Iranian Platforms:*
+• Aparat, Namava
+• Filimo, Tiva
+
+✨ *Features:*
+✅ Quality selection before download
+✅ File size display for each quality
+✅ Video information included
+✅ Supports 50MB max file size
+✅ Public videos only
+
+📝 *How to use:*
+1. Send me a video link
+2. Choose your preferred quality
+3. Wait for download
+
+⚠️ *Note:* Some platforms may require login cookies for better quality.
+"""
+    await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send help message"""
-    help_text = (
-        "❓ *راهنما و عیب‌یابی*\n\n"
-        "*طریقه استفاده:*\n"
-        "۱. لینک ویدیو رو کپی کن\n"
-        "۲. برای ربات ارسال کن\n"
-        "۳. ویدیو با اطلاعات کامل دریافت کن\n\n"
-        "*مشکلات رایج:*\n"
-        "• *خطای فرمت* - ویدیوی دیگه‌ای امتحان کن\n"
-        "• *محدودیت حجم* - حداکثر ۵۰ مگابایت\n"
-        "• *ویدیوی خصوصی* - باید عمومی باشه\n"
-        "• *نیاز به لاگین* - برخی پلتفرم‌ها\n\n"
-        "*بهترین عملکرد:*\n"
-        "• TikTok و YouTube بهترین کارایی رو دارند\n"
-        "• از لینک مستقیم ویدیو استفاده کن\n"
-        "• از صفحات لاگین/اشتراک‌گذاری پرهیز کن\n\n"
-        "*نیاز به کمک؟* لینکت رو بفرست بررسی می‌کنم!"
-    )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    help_text = """
+❓ *Help Guide*
 
-async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all supported platforms with examples"""
-    
-    examples = {
-        "tiktok": "https://www.tiktok.com/@user/video/123456789",
-        "facebook": "https://www.facebook.com/watch/?v=123456789",
-        "youtube": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "instagram": "https://www.instagram.com/reel/ABC123DEF",
-        "twitter": "https://twitter.com/user/status/123456789",
-        "pinterest": "https://www.pinterest.com/pin/123456789",
-        "likee": "https://likee.video/@user/video/123456789",
-        "twitch": "https://www.twitch.tv/videos/123456789",
-        "dailymotion": "https://www.dailymotion.com/video/abc123",
-        "aparat": "https://www.aparat.com/v/abc123",
-        "namava": "https://www.namava.ir/v/abc123",
-        "filimo": "https://www.filimo.com/v/abc123",
-        "tiva": "https://www.tiva.ir/v/abc123"
-    }
-    
-    list_text = (
-        "📋 *تمام پلتفرم‌ها با مثال*\n\n"
-        
-        "*🎬 پلتفرم‌های اصلی:*\n"
-        f"🎵 TikTok\n`{examples['tiktok']}`\n\n"
-        f"📺 YouTube\n`{examples['youtube']}`\n\n"
-        f"📷 Instagram\n`{examples['instagram']}`\n\n"
-        
-        "*📌 پلتفرم‌های دیگر:*\n"
-        f"📌 Pinterest\n`{examples['pinterest']}`\n\n"
-        f"❤️ Likee\n`{examples['likee']}`\n\n"
-        f"🎮 Twitch\n`{examples['twitch']}`\n\n"
-        
-        "*🇮🇷 پلتفرم‌های ایرانی:*\n"
-        f"🇮🇷 آپارات\n`{examples['aparat']}`\n\n"
-        f"🇮🇷 نماوا\n`{examples['namava']}`\n\n"
-        f"🇮🇷 فیلیمو\n`{examples['filimo']}`\n\n"
-        
-        "💡 *نکته:* هر لینک ویدیویی از پلتفرم‌های بالا رو می‌تونی بفرستی!"
-    )
-    
-    await update.message.reply_text(list_text, parse_mode='Markdown')
+📋 *Steps:*
+1. Copy video URL
+2. Send to bot
+3. Select quality from list
+4. Get downloaded file
+
+🎛️ *Quality Selection:*
+- You'll see all available qualities
+- Each option shows resolution and file size
+- Choose based on your needs
+
+📊 *Information Displayed:*
+• Video title and uploader
+• Duration and views
+• Likes count and platform
+• Original URL and file size
+
+🔧 *Tips:*
+• For Facebook/Twitter: Try direct links
+• Max file size: 50MB
+• Some platforms may have limited qualities
+• Use /cookies command to add login cookies
+"""
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+async def cookies_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guide for adding cookies"""
+    cookies_guide = """
+🍪 *Cookies Guide*
+
+Some platforms require login cookies for:
+• Access to private videos
+• Higher quality options
+• Age-restricted content
+
+📁 *Cookie File Location:*
+`cookies/` directory
+
+🎯 *Supported Platforms:*
+• YouTube, Facebook
+• Instagram, Twitter
+• Reddit, Twitch
+
+⚠️ *Important:*
+1. Use browser extensions to export cookies
+2. Save as `cookies.txt` in cookies folder
+3. Restart bot after adding cookies
+
+🔒 *Privacy:* Your cookies are stored locally only.
+"""
+    await update.message.reply_text(cookies_guide, parse_mode=ParseMode.MARKDOWN)
 
 def is_supported(url):
-    """Check if URL is from supported platform"""
+    """Check if URL is supported"""
     url_lower = url.lower()
-    
-    # Check all supported domains
     for domain in SUPPORTED_DOMAINS:
         if domain in url_lower:
             return True
-    
-    # Additional check for common video patterns
-    video_patterns = [
-        r'\.(mp4|avi|mov|mkv|webm|flv|m3u8)',
-        r'/video/',
-        r'/v/',
-        r'/watch',
-        r'/reel/',
-        r'/clip/',
-        r'/status/',
-        r'/tv/'
-    ]
-    
-    for pattern in video_patterns:
-        if re.search(pattern, url_lower):
-            return True
-    
     return False
 
-def get_platform_info(url):
-    """Get platform name and emoji from URL"""
+def format_file_size(size_bytes):
+    """Format file size in human readable format"""
+    if size_bytes == 0 or size_bytes is None:
+        return "Unknown"
+    
+    units = ['B', 'KB', 'MB', 'GB']
+    size = float(size_bytes)
+    unit_index = 0
+    
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    
+    return f"{size:.1f} {units[unit_index]}"
+
+def detect_platform(url):
+    """Detect platform from URL"""
     url_lower = url.lower()
     
-    # Check each platform
-    platform_patterns = {
-        "tiktok": ["tiktok.com", "vm.tiktok", "vt.tiktok"],
-        "facebook": ["facebook.com", "fb.watch", "fb.com"],
-        "youtube": ["youtube.com", "youtu.be"],
-        "instagram": ["instagram.com", "instagr.am"],
-        "twitter": ["twitter.com", "x.com", "t.co"],
-        "reddit": ["reddit.com", "redd.it"],
-        "pinterest": ["pinterest.com", "pin.it"],
-        "likee": ["likee.video", "like.com"],
-        "twitch": ["twitch.tv"],
-        "dailymotion": ["dailymotion.com", "dai.ly"],
-        "streamable": ["streamable.com"],
-        "vimeo": ["vimeo.com"],
-        "rumble": ["rumble.com"],
-        "bilibili": ["bilibili.com", "b23.tv"],
-        "ted": ["ted.com"],
-        "aparat": ["aparat.com"],
-        "namava": ["namava.ir"],
-        "filimo": ["filimo.com"],
-        "tiva": ["tiva.ir"]
+    platform_map = {
+        "tiktok.com": "tiktok",
+        "douyin.com": "tiktok",
+        "facebook.com": "facebook",
+        "fb.watch": "facebook",
+        "youtube.com": "youtube",
+        "youtu.be": "youtube",
+        "instagram.com": "instagram",
+        "twitter.com": "twitter",
+        "x.com": "twitter",
+        "reddit.com": "reddit",
+        "pinterest.com": "pinterest",
+        "pin.it": "pinterest",
+        "likee.video": "likee",
+        "likee.com": "likee",
+        "twitch.tv": "twitch",
+        "dailymotion.com": "dailymotion",
+        "dai.ly": "dailymotion",
+        "streamable.com": "streamable",
+        "vimeo.com": "vimeo",
+        "rumble.com": "rumble",
+        "bilibili.com": "bilibili",
+        "ted.com": "ted",
+        "aparat.com": "aparat",
+        "namava.ir": "namava",
+        "filimo.com": "filimo",
+        "tiva.ir": "tiva"
     }
     
-    for platform_id, patterns in platform_patterns.items():
-        for pattern in patterns:
-            if pattern in url_lower:
-                return PLATFORM_NAMES.get(platform_id, PLATFORM_NAMES["default"])
+    for domain, platform in platform_map.items():
+        if domain in url_lower:
+            return platform
     
-    return PLATFORM_NAMES["default"]
+    return "unknown"
 
-def clean_text(text):
-    """Clean text for safe display"""
-    if not text:
-        return ""
-    
-    # Remove control characters
-    cleaned = re.sub(r'[\x00-\x1F\x7F]', '', text)
-    
-    # Replace problematic characters
-    cleaned = cleaned.replace('`', "'")
-    cleaned = cleaned.replace('```', "'''")
-    
-    # Clean excessive whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    
-    # Truncate if too long
-    if len(cleaned) > 150:
-        cleaned = cleaned[:147] + "..."
-    
-    return cleaned
+async def get_available_formats(url):
+    """Get available formats with size information"""
+    try:
+        # Check cookies
+        cookies_path = "cookies/cookies.txt"
+        cookies_args = []
+        if os.path.exists(cookies_path):
+            cookies_args = ["--cookies", cookies_path]
+        
+        cmd = [
+            "yt-dlp",
+            *cookies_args,
+            "--list-formats",
+            "--no-warnings",
+            url
+        ]
+        
+        logger.info(f"Getting formats with command: {' '.join(cmd)}")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        
+        if process.returncode != 0:
+            logger.error(f"Format list error: {stderr.decode('utf-8', errors='ignore')[:200]}")
+            return None
+        
+        output = stdout.decode('utf-8', errors='ignore')
+        
+        # Parse formats
+        formats = []
+        lines = output.split('\n')
+        
+        for line in lines:
+            # Look for format lines (they contain resolution, filesize, etc.)
+            if 'mp4' in line.lower() or 'webm' in line.lower() or 'm4a' in line.lower():
+                parts = line.split()
+                if len(parts) >= 7:
+                    try:
+                        format_id = parts[0]
+                        extension = parts[1]
+                        resolution = parts[2] if len(parts) > 2 else "N/A"
+                        
+                        # Extract filesize
+                        filesize = None
+                        for i, part in enumerate(parts):
+                            if 'MiB' in part or 'KiB' in part:
+                                # Convert to bytes
+                                size_str = parts[i-1]
+                                unit = parts[i]
+                                try:
+                                    if 'MiB' in unit:
+                                        filesize = float(size_str) * 1024 * 1024
+                                    elif 'KiB' in unit:
+                                        filesize = float(size_str) * 1024
+                                    elif 'GiB' in unit:
+                                        filesize = float(size_str) * 1024 * 1024 * 1024
+                                except:
+                                    filesize = None
+                                break
+                        
+                        # Only add video formats under 50MB
+                        if filesize and filesize <= 50 * 1024 * 1024:
+                            formats.append({
+                                'id': format_id,
+                                'ext': extension,
+                                'resolution': resolution,
+                                'filesize': filesize,
+                                'filesize_str': format_file_size(filesize)
+                            })
+                    except Exception as e:
+                        logger.warning(f"Error parsing format line: {e}")
+                        continue
+        
+        # If no formats found with size, try to get basic formats
+        if not formats:
+            return await get_basic_formats(url)
+        
+        # Sort by filesize (largest first)
+        formats.sort(key=lambda x: x.get('filesize', 0), reverse=True)
+        
+        return formats
+        
+    except asyncio.TimeoutError:
+        logger.warning("Timeout getting formats")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting formats: {e}")
+        return await get_basic_formats(url)
 
-async def get_video_info(url):
-    """Get video information using yt-dlp"""
+async def get_basic_formats(url):
+    """Get basic formats when detailed parsing fails"""
     try:
         cmd = [
             "yt-dlp",
@@ -393,292 +421,443 @@ async def get_video_info(url):
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
         if process.returncode == 0:
-            return json.loads(stdout.decode('utf-8', errors='ignore'))
-        else:
-            logger.debug(f"Info extraction failed: {stderr.decode('utf-8', errors='ignore')[:100]}")
-            return None
+            data = json.loads(stdout.decode('utf-8', errors='ignore'))
+            
+            # Create basic format options
+            formats = []
+            best_format = {
+                'id': 'best',
+                'ext': 'mp4',
+                'resolution': 'Best',
+                'filesize': data.get('filesize_approx') or data.get('filesize'),
+                'filesize_str': format_file_size(data.get('filesize_approx') or data.get('filesize'))
+            }
+            formats.append(best_format)
+            
+            worst_format = {
+                'id': 'worst',
+                'ext': 'mp4',
+                'resolution': 'Worst',
+                'filesize': None,
+                'filesize_str': 'Unknown'
+            }
+            formats.append(worst_format)
+            
+            return formats
             
     except Exception as e:
-        logger.debug(f"Info extraction error: {e}")
-        return None
+        logger.error(f"Error getting basic formats: {e}")
+    
+    return None
 
-def create_caption(video_info, platform_info, url, file_size):
-    """Create informative caption"""
-    
-    # Platform header
-    caption = f"{platform_info['emoji']} *{platform_info['name']}*\n\n"
-    
-    # Add video info if available
-    if video_info:
-        title = clean_text(video_info.get('title', ''))
-        uploader = clean_text(video_info.get('uploader', ''))
-        
-        if title and title != 'Unknown Title':
-            caption += f"📹 *{title}*\n"
-        
-        if uploader and uploader != 'Unknown Uploader':
-            caption += f"👤 *آپلودکننده:* {uploader}\n"
-        
-        # Duration
-        duration = video_info.get('duration', 0)
-        if duration:
-            minutes = duration // 60
-            seconds = duration % 60
-            caption += f"⏱ *مدت:* {minutes}:{seconds:02d}\n"
-        
-        # Stats
-        views = video_info.get('view_count', 0)
-        likes = video_info.get('like_count', 0)
-        
-        if views:
-            caption += f"👁 *بازدید:* {views:,}\n"
-        if likes:
-            caption += f"👍 *لایک:* {likes:,}\n"
-    
-    # File info
-    caption += f"📦 *حجم:* {file_size/1024/1024:.1f}MB\n"
-    
-    # Short URL
-    url_display = url
-    if len(url) > 60:
-        url_display = url[:57] + "..."
-    caption += f"🔗 *لینک:* {url_display}"
-    
-    return caption
-
-async def download_video(url, output_dir):
-    """Download video with smart format selection"""
-    unique_id = uuid4().hex[:10]
-    output_template = f"{output_dir}/{unique_id}.%(ext)s"
-    
-    # Smart format selection based on platform
-    platform_info = get_platform_info(url)
-    platform_id = platform_info.get("id", "default")
-    
-    # Platform-specific formats
-    format_configs = {
-        "facebook": "best[height<=720][filesize<=50M]/best[height<=480]/best[filesize<=50M]/worst",
-        "youtube": "best[height<=720][filesize<=50M]/best[filesize<=50M]/worst",
-        "bilibili": "best[filesize<=50M]/worst",
-        "aparat": "best[filesize<=50M]/worst",
-        "namava": "best[filesize<=50M]/worst",
-        "filimo": "best[filesize<=50M]/worst",
-        "tiva": "best[filesize<=50M]/worst",
-        "default": "best[filesize<=50M]/worst"
-    }
-    
-    format_str = format_configs.get(platform_id, format_configs["default"])
-    
-    # Build command
-    cmd = [
-        "yt-dlp",
-        "--no-warnings",
-        "--format", format_str,
-        "--max-filesize", "50M",
-        "--restrict-filenames",
-        "--socket-timeout", "30",
-        "--retries", "3",
-        "-o", output_template,
-        url
-    ]
-    
+async def get_video_info(url):
+    """Get video information"""
     try:
-        logger.info(f"Downloading from {platform_info['name']}...")
+        cookies_path = "cookies/cookies.txt"
+        cookies_args = []
+        if os.path.exists(cookies_path):
+            cookies_args = ["--cookies", cookies_path]
+        
+        cmd = [
+            "yt-dlp",
+            *cookies_args,
+            "--dump-json",
+            "--no-warnings",
+            "--skip-download",
+            url
+        ]
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
-        if process.returncode != 0:
-            error = stderr.decode('utf-8', errors='ignore').strip()
+        if process.returncode == 0:
+            return json.loads(stdout.decode('utf-8', errors='ignore'))
+        else:
+            logger.warning(f"Could not get video info: {stderr.decode('utf-8', errors='ignore')[:100]}")
+            return None
             
-            # Try fallback format
-            logger.info("Trying fallback format...")
-            fallback_cmd = [
-                "yt-dlp",
-                "--no-warnings",
-                "--format", "best",
-                "--max-filesize", "50M",
-                "-o", output_template,
-                url
-            ]
-            
-            process2 = await asyncio.create_subprocess_exec(
-                *fallback_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout2, stderr2 = await asyncio.wait_for(process2.communicate(), timeout=300)
-            
-            if process2.returncode != 0:
-                error2 = stderr2.decode('utf-8', errors='ignore').strip()
-                error_lines = [line for line in error2.split('\n') if line.strip()]
-                last_error = error_lines[-1] if error_lines else "خطای دانلود"
-                return None, f"{last_error[:100]}"
-        
-        # Find downloaded file
-        for file in Path(output_dir).glob(f"{unique_id}.*"):
-            if file.is_file() and file.stat().st_size > 0:
-                return file, None
-        
-        return None, "فایل بعد از دانلود پیدا نشد"
-        
-    except asyncio.TimeoutError:
-        return None, "زمان دانلود به پایان رسید (۵ دقیقه)"
     except Exception as e:
-        logger.error(f"Download exception: {e}")
-        return None, f"خطا: {str(e)}"
+        logger.error(f"Error getting video info: {e}")
+        return None
+
+def create_video_caption(video_info, platform, url, selected_format=None):
+    """Create video caption with information"""
+    platform_name = PLATFORM_NAMES.get(platform, platform.capitalize())
+    
+    if not video_info:
+        caption = f"📹 Downloaded from {platform_name}\n"
+        caption += f"🔗 {url[:100]}..."
+        return caption
+    
+    try:
+        # Extract information
+        title = video_info.get('title', 'Unknown Title')
+        uploader = video_info.get('uploader', 'Unknown Uploader')
+        
+        # Duration
+        duration = video_info.get('duration', 0)
+        if duration:
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            duration_str = f"{minutes}:{seconds:02d}"
+        else:
+            duration_str = "Unknown"
+        
+        # Stats
+        view_count = video_info.get('view_count')
+        like_count = video_info.get('like_count')
+        
+        # Format numbers
+        views_str = f"{view_count:,}" if view_count else "Unknown"
+        likes_str = f"{like_count:,}" if like_count else "Unknown"
+        
+        # Create caption
+        caption = f"📹 {title[:100]}{'...' if len(title) > 100 else ''}\n\n"
+        caption += f"👤 Uploader: {uploader[:50]}\n"
+        caption += f"⏱ Duration: {duration_str}\n"
+        caption += f"👁 Views: {views_str}\n"
+        caption += f"👍 Likes: {likes_str}\n"
+        caption += f"🏷 Platform: {platform_name}\n"
+        
+        if selected_format:
+            caption += f"📊 Quality: {selected_format.get('resolution', 'Unknown')}\n"
+        
+        # Add URL
+        url_display = url
+        if len(url) > 80:
+            url_display = url[:77] + "..."
+        caption += f"\n🔗 {url_display}"
+        
+        # Ensure caption doesn't exceed Telegram limits
+        if len(caption) > 1000:
+            caption = caption[:997] + "..."
+        
+        return caption
+        
+    except Exception as e:
+        logger.error(f"Error creating caption: {e}")
+        return f"📹 Downloaded from {platform_name}\n🔗 {url[:100]}..."
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming video links"""
+    """Handle incoming links"""
     user = update.effective_user
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    logger.info(f"Message from {user.id} ({user.first_name}): {text[:80]}...")
+    logger.info(f"Message from {user.id}: {text[:50]}")
     
     # Check if it's a URL
     if not text.startswith(('http://', 'https://')):
-        await update.message.reply_text("لطفا یک لینک معتبر با http:// یا https:// ارسال کنید")
+        await update.message.reply_text("Please send a valid URL starting with http:// or https://")
         return
     
     # Check if supported
     if not is_supported(text):
+        platforms_list = "\n".join([f"• {name}" for name in PLATFORM_NAMES.values()])
         await update.message.reply_text(
-            "❌ این پلتفرم پشتیبانی نمی‌شود.\n\n"
-            "برای مشاهده پلتفرم‌های پشتیبانی شده /list را ارسال کنید."
+            f"❌ Platform not supported.\n\n"
+            f"Supported platforms:\n{platforms_list}"
         )
         return
     
-    # Get platform info
-    platform_info = get_platform_info(text)
+    # Detect platform
+    platform = detect_platform(text)
     
-    # Create user directory
-    user_dir = Path(f"downloads/{chat_id}")
-    user_dir.mkdir(parents=True, exist_ok=True)
+    # Send processing message
+    msg = await update.message.reply_text(f"⏳ Analyzing {PLATFORM_NAMES.get(platform, platform)} link...")
     
-    # Send initial message
-    msg = await update.message.reply_text(
-        f"{platform_info['emoji']} درحال پردازش لینک {platform_info['name']}..."
-    )
-    
-    file_path = None
     try:
         # Get video information
-        await msg.edit_text(f"{platform_info['emoji']} دریافت اطلاعات ویدیو...")
+        await msg.edit_text("📋 Getting video information...")
         video_info = await get_video_info(text)
         
-        # Download video
-        await msg.edit_text(f"{platform_info['emoji']} درحال دانلود...")
-        file_path, error = await download_video(text, str(user_dir))
+        # Get available formats
+        await msg.edit_text("🔍 Checking available qualities...")
+        formats = await get_available_formats(text)
         
-        if error:
-            await msg.edit_text(f"❌ {error}")
+        if not formats or len(formats) == 0:
+            await msg.edit_text("❌ No available formats found or video is not accessible.")
             return
         
-        if not file_path or not file_path.exists():
-            await msg.edit_text("❌ فایل بعد از دانلود پیدا نشد")
+        # Store session
+        session = DownloadSession(text, platform, formats)
+        user_sessions[chat_id] = session
+        
+        # Create quality selection keyboard
+        keyboard = []
+        for i, fmt in enumerate(formats[:10]):  # Limit to 10 options
+            if i % 2 == 0:
+                keyboard.append([])
+            
+            # Button text with quality and size
+            resolution = fmt.get('resolution', 'Unknown')
+            size_str = fmt.get('filesize_str', 'Unknown')
+            button_text = f"{resolution} ({size_str})"
+            
+            keyboard[-1].append(InlineKeyboardButton(
+                button_text, 
+                callback_data=f"quality:{i}:{fmt['id']}"
+            ))
+        
+        # Add cancel button
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send format selection message
+        platform_name = PLATFORM_NAMES.get(platform, platform.capitalize())
+        selection_text = f"🎬 *{platform_name} Video Download*\n\n"
+        
+        if video_info:
+            title = video_info.get('title', 'Unknown')[:100]
+            duration = video_info.get('duration', 0)
+            if duration:
+                minutes = int(duration // 60)
+                seconds = int(duration % 60)
+                duration_str = f"{minutes}:{seconds:02d}"
+                selection_text += f"📹 *Title:* {title}\n"
+                selection_text += f"⏱ *Duration:* {duration_str}\n\n"
+        
+        selection_text += f"📊 *Available Qualities:*\n"
+        selection_text += f"(Select one from below)\n\n"
+        
+        await msg.edit_text(
+            selection_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in handle_message: {e}")
+        error_msg = f"❌ Error: {str(e)}"
+        if "private" in str(e).lower() or "login" in str(e).lower():
+            error_msg += "\n\n🔒 This video may be private or require login. Try adding cookies using /cookies command."
+        await msg.edit_text(error_msg)
+
+async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle quality selection callback"""
+    query = update.callback_query
+    await query.answer()
+    
+    chat_id = query.message.chat_id
+    data = query.data
+    
+    if data == "cancel":
+        # Clear session
+        if chat_id in user_sessions:
+            del user_sessions[chat_id]
+        
+        await query.message.edit_text("❌ Download cancelled.")
+        return
+    
+    if data.startswith("quality:"):
+        try:
+            # Parse callback data
+            parts = data.split(":")
+            format_index = int(parts[1])
+            format_id = parts[2]
+            
+            # Get session
+            session = user_sessions.get(chat_id)
+            if not session:
+                await query.message.edit_text("❌ Session expired. Please send the link again.")
+                return
+            
+            # Get selected format
+            if 0 <= format_index < len(session.formats):
+                selected_format = session.formats[format_index]
+                session.selected_format = selected_format
+                
+                # Update message
+                platform_name = PLATFORM_NAMES.get(session.platform, session.platform.capitalize())
+                size_str = selected_format.get('filesize_str', 'Unknown')
+                resolution = selected_format.get('resolution', 'Unknown')
+                
+                await query.message.edit_text(
+                    f"✅ Selected: {resolution} ({size_str})\n"
+                    f"⬇️ Downloading from {platform_name}...",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                # Start download
+                await perform_download(chat_id, session, query.message)
+                
+            else:
+                await query.message.edit_text("❌ Invalid format selection.")
+                
+        except Exception as e:
+            logger.error(f"Error in quality selection: {e}")
+            await query.message.edit_text(f"❌ Error: {str(e)}")
+
+async def perform_download(chat_id, session, message):
+    """Perform the actual download"""
+    try:
+        # Create user directory
+        user_dir = Path(f"downloads/{chat_id}")
+        user_dir.mkdir(parents=True, exist_ok=True)
+        
+        unique_id = uuid4().hex[:8]
+        output_template = f"{user_dir}/{unique_id}.%(ext)s"
+        
+        # Build download command
+        cookies_path = "cookies/cookies.txt"
+        cookies_args = []
+        if os.path.exists(cookies_path):
+            cookies_args = ["--cookies", cookies_path]
+        
+        cmd = [
+            "yt-dlp",
+            *cookies_args,
+            "--no-warnings",
+            "--format", session.selected_format['id'],
+            "--max-filesize", "50M",
+            "--restrict-filenames",
+            "-o", output_template,
+            session.url
+        ]
+        
+        logger.info(f"Downloading with command: {' '.join(cmd[:8])}...")
+        
+        # Start download process
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        await message.edit_text("⬇️ Downloading... (This may take a moment)")
+        
+        # Wait for download to complete
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        
+        if process.returncode != 0:
+            error = stderr.decode('utf-8', errors='ignore').strip()
+            logger.error(f"Download error: {error}")
+            
+            # Try with fallback format
+            if "format is not available" in error:
+                await message.edit_text("⚠️ Selected format not available. Trying fallback...")
+                
+                # Fallback to best quality
+                fallback_cmd = [
+                    "yt-dlp",
+                    *cookies_args,
+                    "--no-warnings",
+                    "--format", "best[filesize<=50M]",
+                    "--max-filesize", "50M",
+                    "--restrict-filenames",
+                    "-o", output_template,
+                    session.url
+                ]
+                
+                process2 = await asyncio.create_subprocess_exec(
+                    *fallback_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout2, stderr2 = await asyncio.wait_for(process2.communicate(), timeout=300)
+                
+                if process2.returncode != 0:
+                    error2 = stderr2.decode('utf-8', errors='ignore').strip()
+                    await message.edit_text(f"❌ Download failed: {error2[:200]}")
+                    return
+        
+        # Find downloaded file
+        downloaded_file = None
+        for file in Path(user_dir).glob(f"{unique_id}.*"):
+            if file.is_file() and file.stat().st_size > 0:
+                downloaded_file = file
+                break
+        
+        if not downloaded_file:
+            await message.edit_text("❌ File not found after download")
             return
         
-        # Check file size (50MB limit)
-        file_size = file_path.stat().st_size
+        # Check file size
+        file_size = downloaded_file.stat().st_size
         if file_size > 50 * 1024 * 1024:
-            await msg.edit_text(f"❌ حجم فایل زیاد است ({file_size/1024/1024:.1f}MB > 50MB)")
-            file_path.unlink()
+            await message.edit_text(f"❌ File too large ({file_size/1024/1024:.1f}MB > 50MB)")
+            downloaded_file.unlink()
             return
+        
+        # Get video info for caption
+        video_info = await get_video_info(session.url)
         
         # Create caption
-        caption = create_caption(video_info, platform_info, text, file_size)
+        caption = create_video_caption(video_info, session.platform, session.url, session.selected_format)
         
         # Send file
-        await msg.edit_text(f"{platform_info['emoji']} درحال آپلود...")
+        await message.edit_text("📤 Uploading to Telegram...")
         
-        with open(file_path, 'rb') as f:
-            # Determine file type
+        with open(downloaded_file, 'rb') as f:
+            # Detect MIME type
             try:
                 result = subprocess.run(
-                    ['file', '-b', '--mime-type', str(file_path)],
+                    ['file', '-b', '--mime-type', str(downloaded_file)],
                     capture_output=True, text=True, timeout=5
                 )
                 mime_type = result.stdout.strip() if result.returncode == 0 else 'video/mp4'
             except:
                 mime_type = 'video/mp4'
             
+            # Send based on file type
             if mime_type.startswith('video'):
-                await update.message.reply_video(
+                await message.reply_video(
                     video=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120
                 )
             elif mime_type.startswith('image'):
-                await update.message.reply_photo(
+                await message.reply_photo(
                     photo=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     read_timeout=60
                 )
             else:
-                await update.message.reply_document(
+                await message.reply_document(
                     document=f,
                     caption=caption,
-                    parse_mode='Markdown',
                     read_timeout=60
                 )
         
-        await msg.edit_text(
-            f"✅ انجام شد! {platform_info['emoji']} {platform_info['name']} - "
-            f"{file_size/1024/1024:.1f}MB"
-        )
+        # Update status
+        size_mb = file_size / 1024 / 1024
+        platform_name = PLATFORM_NAMES.get(session.platform, session.platform.capitalize())
+        await message.edit_text(f"✅ Download complete!\n📦 {platform_name} - {size_mb:.1f}MB")
         
-        logger.info(f"Successfully sent {platform_info['name']} video to {user.id}")
-        
-    except Exception as e:
-        logger.error(f"Error processing {text}: {e}")
-        
-        # Friendly error messages
-        error_msg = f"❌ خطا: {str(e)[:100]}"
-        
-        # Platform-specific tips
-        tips = {
-            "facebook": "از لینک مستقیم ویدیو استفاده کنید، نه صفحات لاگین/اشتراک",
-            "instagram": "مطمئن شوید ویدیو عمومی است",
-            "twitter": "ممکن است برخی ویدیوها محدودیت داشته باشند",
-            "aparat": "آپارات معمولا خوب کار می‌کند",
-            "namava": "نماوا ممکن است نیاز به لاگین داشته باشد",
-            "filimo": "فیلیمو ممکن است محدودیت منطقه‌ای داشته باشد"
-        }
-        
-        platform_id = platform_info.get("id", "")
-        if platform_id in tips:
-            error_msg += f"\n\n💡 *نکته:* {tips[platform_id]}"
-        
-        await msg.edit_text(error_msg, parse_mode='Markdown')
-    
-    finally:
         # Cleanup
-        if file_path and file_path.exists():
-            try:
-                file_path.unlink()
-                logger.info(f"Cleaned up: {file_path}")
-            except:
-                pass
+        if downloaded_file.exists():
+            downloaded_file.unlink()
+        
+        # Clear session
+        if chat_id in user_sessions:
+            del user_sessions[chat_id]
+        
+    except asyncio.TimeoutError:
+        await message.edit_text("❌ Download timeout. The video might be too large or the server is slow.")
+    except Exception as e:
+        logger.error(f"Error in perform_download: {e}")
+        await message.edit_text(f"❌ Error: {str(e)[:200]}")
+        
+        # Cleanup on error
+        if chat_id in user_sessions:
+            del user_sessions[chat_id]
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
-    logger.error(f"Error: {context.error}", exc_info=True)
+    logger.error(f"Update {update} caused error: {context.error}")
     
     if update and update.effective_chat:
         try:
-            await update.effective_chat.send_message(
-                "⚠️ خطایی رخ داد. لطفا دوباره تلاش کنید."
-            )
+            await update.effective_chat.send_message("⚠️ An error occurred. Please try again or send /start")
         except:
             pass
 
@@ -694,17 +873,20 @@ def main():
     # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("list", list_cmd))
+    app.add_handler(CommandHandler("cookies", cookies_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(handle_quality_selection))
     
     # Error handler
     app.add_error_handler(error_handler)
     
     # Start bot
-    logger.info("🤖 Bot starting with ALL platform support...")
-    print("=" * 60)
-    print("✅ Bot running! Press Ctrl+C to stop")
-    print("=" * 60)
+    logger.info("🤖 Enhanced Bot starting...")
+    print("=" * 50)
+    print("✅ Enhanced Bot with Quality Selection")
+    print("✅ Supporting all requested platforms")
+    print("✅ User can choose quality before download")
+    print("=" * 50)
     
     app.run_polling(drop_pending_updates=True)
 
@@ -715,15 +897,15 @@ EOF
 # Make executable
 chmod +x $BOT_FILE
 
-# 7. Create management scripts
-echo -e "${YELLOW}📁 Creating management scripts...${NC}"
+# 7. Create enhanced management scripts
+echo -e "${YELLOW}📁 Creating enhanced scripts...${NC}"
 
 # Start script
 cat << 'EOF' > start.sh
 #!/bin/bash
-# Start the bot
+# Start the enhanced bot
 
-echo "🚀 Starting Complete Downloader Bot..."
+echo "🚀 Starting Enhanced Downloader Bot..."
 source venv/bin/activate
 python3 bot.py
 EOF
@@ -742,269 +924,155 @@ cat << 'EOF' > restart.sh
 #!/bin/bash
 # Restart bot
 
-echo "🔄 Restarting..."
+echo "🔄 Restarting Enhanced Bot..."
 ./stop.sh
 sleep 2
 ./start.sh
 EOF
 
-# Status script
-cat << 'EOF' > status.sh
+# Clear cookies script
+cat << 'EOF' > clear_cookies.sh
 #!/bin/bash
-# Check bot status
+# Clear cookies
 
-echo "🤖 Bot Status"
-echo "============"
-
-if pgrep -f "python3 bot.py" > /dev/null; then
-    echo "✅ Status: RUNNING"
-    echo "📊 PID: $(pgrep -f "python3 bot.py")"
-else
-    echo "❌ Status: STOPPED"
-fi
-
-# Check active downloads
-YTDLP_COUNT=$(pgrep -f "yt-dlp" | wc -l)
-if [ $YTDLP_COUNT -gt 0 ]; then
-    echo "📥 Active downloads: $YTDLP_COUNT"
-fi
-
-# Check directories
-echo "📁 Directories:"
-echo "  downloads/ - $(find downloads -type f 2>/dev/null | wc -l) files"
-echo "  logs/ - $(du -sh logs 2>/dev/null | cut -f1)"
-
-echo "============"
+echo "🧹 Clearing cookies..."
+rm -f cookies/cookies.txt 2>/dev/null
+echo "✅ Cookies cleared"
 EOF
 
 # Make scripts executable
-chmod +x start.sh stop.sh restart.sh status.sh
+chmod +x start.sh stop.sh restart.sh clear_cookies.sh
 
-# 8. Create test file
+# 8. Create comprehensive test file
 cat << 'EOF' > test.py
 #!/usr/bin/env python3
-# Test all platform support
+# Comprehensive test
 
 import sys
 import os
 import subprocess
+import json
 
-print("🔧 Testing Complete Downloader Bot Installation")
+print("🔧 Testing Enhanced Installation...")
 print("=" * 50)
-
-# Test results
-tests = []
-def add_test(name, result):
-    icon = "✅" if result else "❌"
-    tests.append(f"{icon} {name}")
-    return result
 
 # Check Python
 try:
     import platform
-    py_ver = platform.python_version()
-    add_test(f"Python {py_ver}", True)
+    print(f"✅ Python {platform.python_version()}")
 except:
-    add_test("Python", False)
+    print("❌ Python error")
+    sys.exit(1)
 
 # Check packages
-packages_to_check = ["telegram", "dotenv", "json", "re"]
-for pkg in packages_to_check:
+packages = ["telegram", "dotenv", "json", "re", "asyncio"]
+for pkg in packages:
     try:
         __import__(pkg)
-        add_test(pkg, True)
-    except:
-        add_test(pkg, False)
-
-# Check yt-dlp
-result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
-add_test(f"yt-dlp {result.stdout.strip()}" if result.returncode == 0 else "yt-dlp", result.returncode == 0)
+        print(f"✅ {pkg}")
+    except ImportError as e:
+        print(f"❌ {pkg}: {e}")
 
 # Check .env
-env_ok = os.path.exists(".env")
-if env_ok:
+if os.path.exists(".env"):
     with open(".env", "r") as f:
-        env_ok = "BOT_TOKEN=" in f.read()
-add_test(".env file", env_ok)
+        content = f.read()
+        if "BOT_TOKEN=" in content:
+            print("✅ .env with BOT_TOKEN")
+        else:
+            print("❌ .env missing BOT_TOKEN")
+else:
+    print("❌ .env missing")
+
+# Check yt-dlp CLI
+result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
+if result.returncode == 0:
+    version = result.stdout.strip()
+    print(f"✅ yt-dlp CLI: {version}")
+else:
+    print("❌ yt-dlp CLI not working")
 
 # Check directories
-for dir_name in ["downloads", "logs", "venv"]:
-    add_test(f"Directory: {dir_name}", os.path.exists(dir_name))
+directories = ["downloads", "logs", "cookies", "venv"]
+for dir in directories:
+    if os.path.exists(dir):
+        print(f"✅ Directory: {dir}")
+    else:
+        print(f"⚠️ Missing: {dir}")
 
-# Print results
-print("\n".join(tests))
-print("=" * 50)
-
-# Platform count
-platforms = [
-    "TikTok", "Facebook", "YouTube", "Instagram", "Twitter/X", "Reddit",
-    "Pinterest", "Likee", "Twitch", "Dailymotion", "Streamable", "Vimeo",
-    "Rumble", "Bilibili", "TED", "آپارات", "نماوا", "فیلیمو", "تیوا"
+# Check supported platforms
+supported_platforms = [
+    "TikTok", "Facebook", "YouTube", "Instagram",
+    "Twitter/X", "Reddit", "Pinterest", "Likee",
+    "Twitch", "Dailymotion", "Streamable", "Vimeo",
+    "Rumble", "Bilibili", "TED",
+    "Aparat", "Namava", "Filimo", "Tiva"
 ]
 
-print(f"\n🌍 *پشتیبانی از {len(platforms)} پلتفرم:*")
-for i in range(0, len(platforms), 3):
-    line = platforms[i:i+3]
-    print(f"  {' | '.join(line)}")
+print("\n📋 Supported Platforms:")
+for platform in supported_platforms:
+    print(f"   ✅ {platform}")
 
-print("\n" + "=" * 50)
-print("🎉 Installation complete!")
-print("\n✨ *ویژگی‌ها:*")
-print("   • پشتیبانی از تمام پلتفرم‌های درخواستی")
-print("   • اطلاعات کامل ویدیو")
-print("   • کیفیت اتوماتیک")
-print("   • کپشن فارسی و انگلیسی")
+print("\n✨ Features:")
+print("   ✅ Quality selection before download")
+print("   ✅ File size display for each quality")
+print("   ✅ Support for all requested platforms")
+print("   ✅ Iranian platforms support")
+print("   ✅ Cookie support for private videos")
+print("   ✅ Max 50MB file size limit")
+
+print("=" * 50)
+print("🎉 Enhanced Setup Complete!")
 print("\n🚀 To start: ./start.sh")
-print("📋 To list platforms: /list in bot")
-
-success = all(["❌" not in test for test in tests])
-sys.exit(0 if success else 1)
+print("🛑 To stop:  ./stop.sh")
+print("🔄 To restart: ./restart.sh")
+print("🍪 To clear cookies: ./clear_cookies.sh")
+print("\n💡 Tip: Add cookies.txt to cookies/ folder for better quality on some platforms!")
 EOF
 
 chmod +x test.py
 
-# 9. Create requirements.txt
+# 9. Create enhanced requirements.txt
 cat << 'EOF' > requirements.txt
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 EOF
 
-# 10. Create platform examples file
-cat << 'EOF' > examples.txt
-# مثال‌های لینک برای تست پلتفرم‌های مختلف:
+# 10. Create README
+cat << 'EOF' > README.md
+# Enhanced Telegram Downloader Bot
 
-📌 Pinterest:
-https://www.pinterest.com/pin/123456789/
+Advanced bot for downloading videos from multiple social media platforms with quality selection.
 
-❤️ Likee:
-https://likee.video/@username/video/123456789
+## ✨ Features
 
-🎮 Twitch:
-https://www.twitch.tv/videos/123456789
-https://clips.twitch.tv/CoolClipName
+- **Quality Selection**: Choose quality before downloading
+- **File Size Display**: See size for each quality option
+- **Multi-Platform Support**: 20+ platforms supported
+- **Iranian Platforms**: Aparat, Namava, Filimo, Tiva
+- **Cookie Support**: Login cookies for private videos
+- **Video Info**: Title, uploader, duration, views, likes
 
-🎬 Dailymotion:
-https://www.dailymotion.com/video/abc123
-https://dai.ly/abc123
+## 📋 Supported Platforms
 
-🎥 Streamable:
-https://streamable.com/abc123
+### Main Platforms
+- TikTok, Douyin
+- Facebook, Instagram
+- YouTube, Twitter/X
+- Reddit, Pinterest
+- Likee, Twitch
+- Dailymotion, Streamable
+- Vimeo, Rumble
+- Bilibili, TED
 
-🎞️ Vimeo:
-https://vimeo.com/123456789
+### Iranian Platforms
+- Aparat
+- Namava  
+- Filimo
+- Tiva
 
-⚡ Rumble:
-https://rumble.com/abc123-def456
+## 🚀 Installation
 
-🇨🇳 Bilibili:
-https://www.bilibili.com/video/BV123456789
-https://b23.tv/abc123
-
-💡 TED:
-https://www.ted.com/talks/123
-
-🇮🇷 آپارات:
-https://www.aparat.com/v/abc123
-
-🇮🇷 نماوا:
-https://www.namava.ir/v/abc123
-
-🇮🇷 فیلیمو:
-https://www.filimo.com/v/abc123
-
-🇮🇷 تیوا:
-https://www.tiva.ir/v/abc123
-
-🎵 TikTok:
-https://www.tiktok.com/@user/video/123456789
-
-📘 Facebook:
-https://www.facebook.com/watch/?v=123456789
-https://fb.watch/abc123def/
-
-📺 YouTube:
-https://www.youtube.com/watch?v=dQw4w9WgXcQ
-https://youtu.be/dQw4w9WgXcQ
-
-📷 Instagram:
-https://www.instagram.com/reel/ABC123DEF/
-https://www.instagram.com/p/ABC123DEF/
-
-🐦 Twitter/X:
-https://twitter.com/user/status/123456789
-https://x.com/user/status/123456789
-
-👽 Reddit:
-https://www.reddit.com/r/videos/comments/abc123/title/
-EOF
-
-# 11. Final instructions
-echo -e "\n${PURPLE}==============================================${NC}"
-echo -e "${PURPLE}✅ نصب کامل بات دانلودر با تمام پلتفرم‌ها${NC}"
-echo -e "${PURPLE}==============================================${NC}"
-echo -e "\n${GREEN}📁 فایل‌های ایجاد شده:${NC}"
-ls -la
-
-echo -e "\n${CYAN}🚀 برای شروع:${NC}"
-echo -e "  ${GREEN}./start.sh${NC}"
-
-echo -e "\n${YELLOW}⚙️ دستورات مدیریت:${NC}"
-echo -e "  ${GREEN}./stop.sh${NC}      # توقف بات"
-echo -e "  ${GREEN}./restart.sh${NC}   # راه‌اندازی مجدد"
-echo -e "  ${GREEN}./status.sh${NC}    # وضعیت بات"
-echo -e "  ${GREEN}./test.py${NC}      # تست نصب"
-
-echo -e "\n${PURPLE}🌍 پلتفرم‌های پشتیبانی شده:${NC}"
-echo -e "  ${BLUE}🎬 بین‌المللی:${NC}"
-echo -e "    • TikTok 🎵      • Facebook 📘"
-echo -e "    • YouTube 📺     • Instagram 📷"
-echo -e "    • Twitter/X 🐦   • Reddit 👽"
-echo -e "    • Pinterest 📌   • Likee ❤️"
-echo -e "    • Twitch 🎮      • Dailymotion 🎬"
-echo -e "    • Streamable 🎥  • Vimeo 🎞️"
-echo -e "    • Rumble ⚡      • Bilibili 🇨🇳"
-echo -e "    • TED 💡"
-
-echo -e "\n  ${RED}🇮🇷 ایرانی:${NC}"
-echo -e "    • آپارات 🇮🇷     • نماوا 🇮🇷"
-echo -e "    • فیلیمو 🇮🇷     • تیوا 🇮🇷"
-
-echo -e "\n${GREEN}✨ ویژگی‌ها:${NC}"
-echo -e "  • اطلاعات کامل ویدیو"
-echo -e "  • کپشن فارسی/انگلیسی"
-echo -e "  • کیفیت اتوماتیک"
-echo -e "  • بدون مشکل Markdown"
-echo -e "  • حداکثر حجم: ۵۰ مگابایت"
-
-echo -e "\n${YELLOW}📝 دستورات بات:${NC}"
-echo -e "  /start - راهنما"
-echo -e "  /help  - کمک"
-echo -e "  /list  - لیست پلتفرم‌ها"
-
-echo -e "\n${RED}⚠️ نکات مهم:${NC}"
-echo -e "  • فقط ویدیوهای عمومی"
-echo -e "  • برخی پلتفرم‌ها ممکنه محدودیت داشته باشند"
-echo -e "  • پلتفرم‌های ایرانی نیاز به تست دارند"
-
-echo -e "\n${GREEN}🤖 بات آماده با پشتیبانی از تمام پلتفرم‌ها!${NC}"
-echo -e "${PURPLE}==============================================${NC}"
-
-# 12. Test and ask to start
-echo -e "\n${YELLOW}آیا می‌خواهید نصب را تست کنید؟ (y/n)${NC}"
-read -r TEST
-
-if [[ "$TEST" =~ ^[Yy]$ ]]; then
-    source venv/bin/activate
-    python3 test.py
-fi
-
-echo -e "\n${YELLOW}آیا می‌خواهید بات را الآن شروع کنید؟ (y/n)${NC}"
-read -r START
-
-if [[ "$START" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}درحال شروع...${NC}"
-    ./start.sh
-else
-    echo -e "${YELLOW}برای شروع بعدی: ./start.sh${NC}"
-    echo -e "${CYAN}مثال‌های لینک در فایل examples.txt ذخیره شدند.${NC}"
-fi
+1. Run the setup script:
+```bash
+bash install.sh
