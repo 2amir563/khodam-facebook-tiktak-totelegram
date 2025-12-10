@@ -24,7 +24,7 @@ sudo apt update
 sudo apt install -y python3 python3-pip python3-venv curl ffmpeg
 
 # 2. Install yt-dlp
-echo -e "${YELLOW}⬇️ Installing yt-dlp...${NC}"
+echo -e "${YELLow}⬇️ Installing yt-dlp...${NC}"
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+x /usr/local/bin/yt-dlp
 echo -e "${GREEN}✅ yt-dlp installed${NC}"
@@ -55,13 +55,13 @@ fi
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved${NC}"
 
-# 6. Create bot.py with caption support
-echo -e "${YELLOW}📝 Creating bot.py...${NC}"
+# 6. Create bot.py with video info caption
+echo -e "${YELLOW}📝 Creating bot.py with video info...${NC}"
 
 cat << 'EOF' > $BOT_FILE
 #!/usr/bin/env python3
 """
-Simple Telegram Downloader Bot with Caption
+Simple Telegram Downloader Bot with Video Info Caption
 """
 import os
 import sys
@@ -108,6 +108,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• TikTok\n• Facebook\n• YouTube\n"
         "• Instagram\n• Twitter/X\n• Reddit\n\n"
         "📝 *Send me a link!*\n\n"
+        "✨ *New:* Video information included in caption!\n\n"
         "⚠️ *Note:*\n"
         "• Max 50MB\n• Public videos only\n"
         "• Facebook: Use direct links\n"
@@ -124,6 +125,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Copy video link\n"
         "2. Send to bot\n"
         "3. Get downloaded file with video info\n\n"
+        "*Features:*\n"
+        "📹 Title, uploader, duration\n"
+        "👁 Views and likes count\n"
+        "📦 File size and platform\n"
+        "🔗 Original URL\n\n"
         "*For Facebook:*\n"
         "✅ Working:\n"
         "• https://www.facebook.com/watch/?v=123\n"
@@ -165,40 +171,75 @@ async def get_video_info(url):
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
         if process.returncode == 0:
-            info = json.loads(stdout.decode('utf-8'))
-            
-            # Extract relevant information
-            title = info.get('title', 'Unknown Title')
-            duration = info.get('duration', 0)
-            uploader = info.get('uploader', 'Unknown Uploader')
-            view_count = info.get('view_count', 0)
-            like_count = info.get('like_count', 0)
-            
-            # Format duration
-            if duration:
-                minutes = duration // 60
-                seconds = duration % 60
-                duration_str = f"{minutes}:{seconds:02d}"
-            else:
-                duration_str = "Unknown"
-            
-            # Create caption
-            caption = (
-                f"📹 *{title}*\n\n"
-                f"👤 Uploader: {uploader}\n"
-                f"⏱ Duration: {duration_str}\n"
-                f"👁 Views: {view_count:,}\n"
-                f"👍 Likes: {like_count:,}\n\n"
-                f"🔗 Original URL: {url}"
-            )
-            
-            return caption, info
+            return json.loads(stdout.decode('utf-8'))
         else:
-            return None, None
+            logger.warning(f"Could not get video info: {stderr.decode('utf-8', errors='ignore')}")
+            return None
             
+    except asyncio.TimeoutError:
+        logger.warning("Timeout getting video info")
+        return None
+    except json.JSONDecodeError:
+        logger.warning("Invalid JSON from yt-dlp")
+        return None
     except Exception as e:
         logger.error(f"Error getting video info: {e}")
-        return None, None
+        return None
+
+def create_caption(video_info, platform, url, file_size=None):
+    """Create caption from video info"""
+    if not video_info:
+        # Basic caption if no info available
+        caption = f"📹 Downloaded from {platform.capitalize()}\n🔗 {url}"
+        if file_size:
+            caption += f"\n📦 Size: {file_size/1024/1024:.1f}MB"
+        return caption
+    
+    try:
+        # Extract information with fallbacks
+        title = video_info.get('title', 'Unknown Title')
+        uploader = video_info.get('uploader', 'Unknown Uploader')
+        
+        # Duration
+        duration = video_info.get('duration', 0)
+        if duration:
+            minutes = duration // 60
+            seconds = duration % 60
+            duration_str = f"{minutes}:{seconds:02d}"
+        else:
+            duration_str = "Unknown"
+        
+        # Stats
+        view_count = video_info.get('view_count', 0)
+        like_count = video_info.get('like_count', 0)
+        
+        # Format numbers
+        views_str = f"{view_count:,}" if view_count else "Unknown"
+        likes_str = f"{like_count:,}" if like_count else "Unknown"
+        
+        # Create caption
+        caption = (
+            f"📹 *{title[:100]}{'...' if len(title) > 100 else ''}*\n\n"
+            f"👤 *Uploader:* {uploader}\n"
+            f"⏱ *Duration:* {duration_str}\n"
+            f"👁 *Views:* {views_str}\n"
+            f"👍 *Likes:* {likes_str}\n"
+            f"🏷 *Platform:* {platform.capitalize()}\n"
+        )
+        
+        # Add file size if available
+        if file_size:
+            caption += f"📦 *File Size:* {file_size/1024/1024:.1f}MB\n"
+        
+        # Add URL
+        caption += f"\n🔗 *Original URL:*\n{url}"
+        
+        return caption
+        
+    except Exception as e:
+        logger.error(f"Error creating caption: {e}")
+        # Fallback caption
+        return f"📹 Downloaded from {platform.capitalize()}\n🔗 {url}"
 
 async def download_video(url, output_dir, platform=None):
     """Download video using yt-dlp with fallback formats"""
@@ -340,13 +381,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     file_path = None
     try:
-        # Get video information first
-        await msg.edit_text(f"📋 Getting video info...")
-        caption, video_info = await get_video_info(text)
-        
-        if not caption:
-            # If can't get info, create simple caption
-            caption = f"📹 Downloaded from {platform}\n🔗 {text}"
+        # Get video information in background
+        await msg.edit_text("📋 Getting video information...")
+        video_info = await get_video_info(text)
         
         # Download video
         await msg.edit_text(f"⬇️ Downloading from {platform}...")
@@ -375,11 +412,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path.unlink()
             return
         
-        # Add file size to caption
-        caption += f"\n📦 File Size: {file_size/1024/1024:.1f}MB"
+        # Create caption with video info
+        caption = create_caption(video_info, platform, text, file_size)
         
         # Send file
-        await msg.edit_text("📤 Uploading...")
+        await msg.edit_text("📤 Uploading with info...")
         
         with open(file_path, 'rb') as f:
             # Check file type
@@ -416,7 +453,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     read_timeout=60
                 )
         
-        await msg.edit_text(f"✅ Done! {platform} - {file_size/1024/1024:.1f}MB")
+        await msg.edit_text(f"✅ Done! {platform.capitalize()} - {file_size/1024/1024:.1f}MB")
         
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -475,8 +512,8 @@ EOF
 # Make executable
 chmod +x $BOT_FILE
 
-# 7. Create management scripts
-echo -e "${YELLOW}📁 Creating management scripts...${NC}"
+# 7. Create simple management scripts
+echo -e "${YELLOW}📁 Creating simple scripts...${NC}"
 
 # Start script
 cat << 'EOF' > start.sh
@@ -566,11 +603,16 @@ for dir in ["downloads", "logs", "venv"]:
 
 print("=" * 30)
 print("🎉 Setup complete!")
-print("\n📹 Bot now shows video information:")
-print("- Title\n- Uploader\n- Duration")
-print("- Views & Likes\n- File size\n- Original URL")
+print("\n✨ *New Feature:* Video information in caption!")
+print("   📹 Title and uploader")
+print("   ⏱ Duration")
+print("   👁 Views and likes")
+print("   🏷 Platform")
+print("   📦 File size")
+print("   🔗 Original URL")
 print("\nTo start: ./start.sh")
 print("To stop:  ./stop.sh")
+print("\n💡 Works with all supported platforms!")
 EOF
 
 chmod +x test.py
@@ -595,16 +637,20 @@ echo -e "  ${GREEN}./stop.sh${NC}      # Stop bot"
 echo -e "  ${GREEN}./restart.sh${NC}   # Restart"
 echo -e "  ${GREEN}./test.py${NC}      # Test setup"
 echo -e "\n✨ ${GREEN}New Features:${NC}"
-echo -e "  📹 Video information in caption"
+echo -e "  📹 Video information for ALL platforms"
 echo -e "  📋 Title, uploader, duration"
 echo -e "  👁 Views and likes count"
+echo -e "  🏷 Platform name"
 echo -e "  📦 File size"
 echo -e "  🔗 Original URL"
+echo -e "\n📱 ${YELLOW}Works with:${NC}"
+echo -e "  • TikTok\n  • Facebook\n  • YouTube"
+echo -e "  • Instagram\n  • Twitter/X\n  • Reddit"
 echo -e "\n${RED}⚠️ Important:${NC}"
-echo -e "  • Some platforms may not provide all info"
-echo -e "  • Facebook may have limited info"
+echo -e "  • Some platforms may have limited info"
 echo -e "  • Max 50MB per file"
-echo -e "\n${GREEN}🤖 Bot ready with captions!${NC}"
+echo -e "  • Public videos only"
+echo -e "\n${GREEN}🤖 Bot ready with video info captions!${NC}"
 
 # 11. Test and ask to start
 echo -e "\n${YELLOW}Test installation? (y/n)${NC}"
