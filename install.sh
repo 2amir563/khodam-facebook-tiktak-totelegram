@@ -1,7 +1,8 @@
 #!/bin/bash
 # ===========================================
-# Telegram Media Downloader Bot - ULTIMATE UNIVERSAL VERSION
-# Version 7.0 - WORKS WITH ALL SITES
+# Telegram Media Downloader Bot - UNIVERSAL VERSION
+# Version 7.0 - Fixed Installation Issues
+# Repository: https://github.com/YOUR_USERNAME/YOUR_REPO
 # ============================================
 
 set -e  # Exit on error
@@ -89,30 +90,32 @@ mkdir -p downloads logs cookies tmp
 chmod 755 downloads logs cookies tmp
 
 # ============================================
-# STEP 4: Install Python Dependencies
+# STEP 4: Install Python Dependencies (FIXED)
 # ============================================
 print_status "Installing Python dependencies..."
 pip3 install --upgrade pip
-pip3 install \
-    python-telegram-bot==20.7 \
-    yt-dlp==2024.4.9 \
-    python-dotenv==1.0.0 \
-    aiofiles==23.2.1 \
-    psutil==5.9.8 \
-    requests==2.31.0 \
-    beautifulsoup4==4.12.3 \
-    lxml==4.9.4 \
-    pillow==10.2.0 \
-    urllib3==2.1.0 \
-    yt-dlp-cookies==2024.4.9 \
-    brotli==1.1.0
+
+# Install dependencies one by one to avoid conflicts
+for package in \
+    "python-telegram-bot==20.7" \
+    "yt-dlp==2024.4.9" \
+    "python-dotenv==1.0.0" \
+    "aiofiles==23.2.1" \
+    "psutil==5.9.8" \
+    "requests==2.31.0" \
+    "beautifulsoup4==4.12.3" \
+    "lxml==4.9.4" \
+    "pillow==10.2.0" \
+    "urllib3==2.1.0" \
+    "brotli==1.1.0"
+do
+    print_status "Installing $package..."
+    pip3 install $package || print_warning "Failed to install $package, continuing..."
+done
 
 # Update yt-dlp with ALL extractors
 print_status "Installing yt-dlp with ALL extractors..."
 pip3 install --upgrade --force-reinstall "yt-dlp[default]"
-
-# Install additional extractors
-pip3 install yt-dlp-reddit yt-dlp-cookies
 
 # ============================================
 # STEP 5: Create Configuration Files
@@ -141,6 +144,8 @@ ENABLE_QUALITY_SELECTION=false  # Disable for problematic sites
 SHOW_FILE_SIZE=true
 AUTO_CLEANUP=true
 EOF
+
+print_status "Created .env file with your bot token"
 
 # Create yt-dlp config
 mkdir -p ~/.config/yt-dlp
@@ -176,15 +181,45 @@ cat > ~/.config/yt-dlp/config << 'EOF'
 EOF
 
 # ============================================
-# STEP 6: Create UNIVERSAL Bot File (SOLVES ALL SITES)
+# STEP 6: Create Bot Service File
 # ============================================
-print_status "Creating UNIVERSAL bot file..."
+print_status "Creating systemd service..."
+
+cat > /etc/systemd/system/telegram-media-bot.service << EOF
+[Unit]
+Description=Telegram Media Downloader Bot
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=/opt/telegram-media-bot
+ExecStart=/usr/bin/python3 /opt/telegram-media-bot/bot.py
+StandardOutput=append:/opt/telegram-media-bot/logs/bot.log
+StandardError=append:/opt/telegram-media-bot/logs/bot-error.log
+Environment=PATH=/usr/bin:/usr/local/bin
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable telegram-media-bot.service
+
+# ============================================
+# STEP 7: Create Bot File
+# ============================================
+print_status "Creating bot main file..."
 
 cat > bot.py << 'EOF'
 #!/usr/bin/env python3
 """
 Telegram Media Downloader Bot - UNIVERSAL VERSION
-WORKS WITH ALL SITES - SOLVES ALL yt-dlp ERRORS
+Fixed installation issues - No yt-dlp-cookies dependency
 """
 
 import os
@@ -293,6 +328,18 @@ SITE_CONFIGS = {
     },
     "youtu.be": {
         "cmd": ["yt-dlp", "--format", "best[height<=1080]"],
+        "requires_cookies": False
+    },
+    "instagram.com": {
+        "cmd": ["yt-dlp", "--format", "best"],
+        "requires_cookies": True
+    },
+    "twitter.com": {
+        "cmd": ["yt-dlp", "--format", "best"],
+        "requires_cookies": False
+    },
+    "x.com": {
+        "cmd": ["yt-dlp", "--format", "best"],
         "requires_cookies": False
     }
 }
@@ -543,7 +590,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """
 🤖 *UNIVERSAL Media Downloader Bot*
 
-✅ *NOW SUPPORTS ALL YOUR SITES:*
+✅ *NOW SUPPORTS ALL SITES:*
 • Pinterest (pin.it) - ✅ FIXED
 • TED - ✅ FIXED  
 • Rumble - ✅ FIXED
@@ -818,11 +865,53 @@ EOF
 chmod +x bot.py
 
 # ============================================
-# STEP 7: Create Cookies Guide
+# STEP 8: Create Management Scripts
 # ============================================
-print_status "Creating cookies setup guide..."
+print_status "Creating management scripts..."
 
-cat > /opt/telegram-media-bot/COOKIES_GUIDE.md << 'EOF'
+# Create start script
+cat > start-bot.sh << 'EOF'
+#!/bin/bash
+cd /opt/telegram-media-bot
+source .env
+python3 bot.py
+EOF
+chmod +x start-bot.sh
+
+# Create stop script
+cat > stop-bot.sh << 'EOF'
+#!/bin/bash
+systemctl stop telegram-media-bot.service
+echo "Bot stopped"
+EOF
+chmod +x stop-bot.sh
+
+# Create restart script
+cat > restart-bot.sh << 'EOF'
+#!/bin/bash
+systemctl restart telegram-media-bot.service
+echo "Bot restarted"
+EOF
+chmod +x restart-bot.sh
+
+# Create status script
+cat > bot-status.sh << 'EOF'
+#!/bin/bash
+systemctl status telegram-media-bot.service
+EOF
+chmod +x bot-status.sh
+
+# Create logs script
+cat > bot-logs.sh << 'EOF'
+#!/bin/bash
+tail -f /opt/telegram-media-bot/logs/bot.log
+EOF
+chmod +x bot-logs.sh
+
+# ============================================
+# STEP 9: Create Cookies Guide
+# ============================================
+cat > COOKIES_GUIDE.md << 'EOF'
 # 🍪 Cookies Setup Guide
 
 Some websites require cookies for downloading:
@@ -845,15 +934,13 @@ Some websites require cookies for downloading:
 4. Click extension → Export cookies
 5. Save as `cookies.txt` in `/opt/telegram-media-bot/cookies/`
 
-### Method 2: Using curl (Command line)
+### Method 2: Manual setup
 ```bash
-# Get cookies from browser and convert
+# Navigate to cookies directory
 cd /opt/telegram-media-bot/cookies/
 
-# For Chrome (Linux):
-cp ~/.config/google-chrome/Default/Cookies ./cookies.db
+# Create cookies.txt file
+nano cookies.txt
 
-# Convert to cookies.txt:
-echo '# Netscape HTTP Cookie File' > cookies.txt
-echo '# This file was generated by bot' >> cookies.txt
-echo -e ".pinterest.com\tTRUE\t/\tTRUE\t0\tsession\tYOUR_SESSION_COOKIE" >> cookies.txt
+# Add your cookies in Netscape format:
+# .domain.com    TRUE    /    TRUE    timestamp    cookie_name    cookie_value
