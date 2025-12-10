@@ -55,19 +55,20 @@ fi
 echo "BOT_TOKEN=$BOT_TOKEN" > $ENV_FILE
 echo -e "${GREEN}✅ Token saved${NC}"
 
-# 6. Create improved bot.py with format fallback
+# 6. Create bot.py with caption support
 echo -e "${YELLOW}📝 Creating bot.py...${NC}"
 
 cat << 'EOF' > $BOT_FILE
 #!/usr/bin/env python3
 """
-Simple Telegram Downloader Bot
+Simple Telegram Downloader Bot with Caption
 """
 import os
 import sys
 import logging
 import subprocess
 import asyncio
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -122,7 +123,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❓ *Help*\n\n"
         "1. Copy video link\n"
         "2. Send to bot\n"
-        "3. Get downloaded file\n\n"
+        "3. Get downloaded file with video info\n\n"
         "*For Facebook:*\n"
         "✅ Working:\n"
         "• https://www.facebook.com/watch/?v=123\n"
@@ -143,6 +144,61 @@ def is_supported(url):
         if domain in url_lower:
             return True
     return False
+
+async def get_video_info(url):
+    """Get video information using yt-dlp"""
+    try:
+        cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-warnings",
+            "--skip-download",
+            url
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        
+        if process.returncode == 0:
+            info = json.loads(stdout.decode('utf-8'))
+            
+            # Extract relevant information
+            title = info.get('title', 'Unknown Title')
+            duration = info.get('duration', 0)
+            uploader = info.get('uploader', 'Unknown Uploader')
+            view_count = info.get('view_count', 0)
+            like_count = info.get('like_count', 0)
+            
+            # Format duration
+            if duration:
+                minutes = duration // 60
+                seconds = duration % 60
+                duration_str = f"{minutes}:{seconds:02d}"
+            else:
+                duration_str = "Unknown"
+            
+            # Create caption
+            caption = (
+                f"📹 *{title}*\n\n"
+                f"👤 Uploader: {uploader}\n"
+                f"⏱ Duration: {duration_str}\n"
+                f"👁 Views: {view_count:,}\n"
+                f"👍 Likes: {like_count:,}\n\n"
+                f"🔗 Original URL: {url}"
+            )
+            
+            return caption, info
+        else:
+            return None, None
+            
+    except Exception as e:
+        logger.error(f"Error getting video info: {e}")
+        return None, None
 
 async def download_video(url, output_dir, platform=None):
     """Download video using yt-dlp with fallback formats"""
@@ -284,6 +340,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     file_path = None
     try:
+        # Get video information first
+        await msg.edit_text(f"📋 Getting video info...")
+        caption, video_info = await get_video_info(text)
+        
+        if not caption:
+            # If can't get info, create simple caption
+            caption = f"📹 Downloaded from {platform}\n🔗 {text}"
+        
         # Download video
         await msg.edit_text(f"⬇️ Downloading from {platform}...")
         file_path, error = await download_video(text, str(user_dir), platform)
@@ -311,6 +375,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path.unlink()
             return
         
+        # Add file size to caption
+        caption += f"\n📦 File Size: {file_size/1024/1024:.1f}MB"
+        
         # Send file
         await msg.edit_text("📤 Uploading...")
         
@@ -328,7 +395,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if mime_type.startswith('video'):
                 await update.message.reply_video(
                     video=f,
-                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    caption=caption,
+                    parse_mode='Markdown',
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120
@@ -336,13 +404,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif mime_type.startswith('image'):
                 await update.message.reply_photo(
                     photo=f,
-                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    caption=caption,
+                    parse_mode='Markdown',
                     read_timeout=60
                 )
             else:
                 await update.message.reply_document(
                     document=f,
-                    caption=f"✅ Downloaded from {platform}\nSize: {file_size/1024/1024:.1f}MB",
+                    caption=caption,
+                    parse_mode='Markdown',
                     read_timeout=60
                 )
         
@@ -405,8 +475,8 @@ EOF
 # Make executable
 chmod +x $BOT_FILE
 
-# 7. Create simple management scripts
-echo -e "${YELLOW}📁 Creating simple scripts...${NC}"
+# 7. Create management scripts
+echo -e "${YELLOW}📁 Creating management scripts...${NC}"
 
 # Start script
 cat << 'EOF' > start.sh
@@ -462,20 +532,13 @@ except:
     sys.exit(1)
 
 # Check packages
-packages = ["telegram", "dotenv"]
+packages = ["telegram", "dotenv", "json"]
 for pkg in packages:
     try:
         __import__(pkg)
         print(f"✅ {pkg}")
     except ImportError as e:
         print(f"❌ {pkg}: {e}")
-
-# Check yt-dlp package
-try:
-    import yt_dlp
-    print("✅ yt-dlp package")
-except ImportError:
-    print("⚠️ yt-dlp Python package missing (but CLI may work)")
 
 # Check .env
 if os.path.exists(".env"):
@@ -503,12 +566,11 @@ for dir in ["downloads", "logs", "venv"]:
 
 print("=" * 30)
 print("🎉 Setup complete!")
+print("\n📹 Bot now shows video information:")
+print("- Title\n- Uploader\n- Duration")
+print("- Views & Likes\n- File size\n- Original URL")
 print("\nTo start: ./start.sh")
 print("To stop:  ./stop.sh")
-print("\n💡 For Facebook issues:")
-print("- Try different videos")
-print("- Use TikTok/YouTube links")
-print("- Some Facebook videos have format restrictions")
 EOF
 
 chmod +x test.py
@@ -532,15 +594,17 @@ echo -e "\n⚙️ ${YELLOW}Other commands:${NC}"
 echo -e "  ${GREEN}./stop.sh${NC}      # Stop bot"
 echo -e "  ${GREEN}./restart.sh${NC}   # Restart"
 echo -e "  ${GREEN}./test.py${NC}      # Test setup"
-echo -e "\n📝 ${YELLOW}Usage:${NC}"
-echo -e "  1. Start bot: ./start.sh"
-echo -e "  2. Send /start to your bot"
-echo -e "  3. Send video link"
+echo -e "\n✨ ${GREEN}New Features:${NC}"
+echo -e "  📹 Video information in caption"
+echo -e "  📋 Title, uploader, duration"
+echo -e "  👁 Views and likes count"
+echo -e "  📦 File size"
+echo -e "  🔗 Original URL"
 echo -e "\n${RED}⚠️ Important:${NC}"
-echo -e "  • Some Facebook videos have format restrictions"
-echo -e "  • TikTok/YouTube work best"
+echo -e "  • Some platforms may not provide all info"
+echo -e "  • Facebook may have limited info"
 echo -e "  • Max 50MB per file"
-echo -e "\n${GREEN}🤖 Bot ready!${NC}"
+echo -e "\n${GREEN}🤖 Bot ready with captions!${NC}"
 
 # 11. Test and ask to start
 echo -e "\n${YELLOW}Test installation? (y/n)${NC}"
