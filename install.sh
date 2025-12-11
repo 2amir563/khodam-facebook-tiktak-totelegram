@@ -1,10 +1,10 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V16 - Download Optimization)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V17 - Stability Fix)
 
 set -e # Exit immediately if a command exits with a non-zero status
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V16)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V17)"
 echo "=============================================="
 echo ""
 
@@ -112,15 +112,15 @@ ENVEOF
 print_status "Configuration created."
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - V16: Optimized Download)
+# STEP 6: Create Bot File (bot.py - V17: Final Download Stabilization)
 # ============================================
-print_status "Creating bot main file (bot.py - V16)..."
+print_status "Creating bot main file (bot.py - V17)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v16 - Download Optimization)
-Fixed: Enhanced download parameters to mitigate "Empty File" and "No formats found" errors.
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v17 - Final Download Stabilization)
+Fixed: Removed incompatible --no-clean-names parameter. Using stable download formats.
 """
 
 import os
@@ -204,10 +204,10 @@ def format_size(bytes_val):
         return "Unknown"
 
 async def download_video(url, output_path):
-    """Download video using yt-dlp with optimized options (V16)"""
+    """Download video using yt-dlp with optimized options (V17)"""
     
-    # V16: Use best format with mp4 preference, and include a generic 'best' fallback
-    download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+    # V17: Stable format selection - prioritizing MP4 but allowing best available
+    download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
     
     cmd = [
         "python3", "-m", "yt_dlp",
@@ -218,17 +218,17 @@ async def download_video(url, output_path):
         "--no-playlist",
         "--concurrent-fragments", "4",
         "--limit-rate", "10M",
-        # --- V16 Download Optimizations ---
-        "--retries", "20",  # Increased retries
-        "--fragment-retries", "20", # Increased fragment retries
-        "--buffer-size", "512K", # Increased buffer size
+        # --- V17 Stable Options ---
+        "--retries", "15",
+        "--fragment-retries", "15",
+        "--buffer-size", "256K",
         "--user-agent", USER_AGENT, 
         "--no-check-certificate", 
         "--referer", "https://google.com/",
         "--http-chunk-size", "10M",
-        "--no-clean-names", # Prevents issues with special characters in file names
+        # Removed: --no-clean-names (caused error)
+        # Removed: --force-format (caused issues with some merges)
         "--force-overwrite", # Ensure no conflicts with existing files
-        "--force-format", "mp4", # V16: Force preferred container (helps with audio/video merge errors)
         # ------------------------------------
         url
     ]
@@ -276,6 +276,8 @@ async def download_video(url, output_path):
                 error_summary = "Login Required (Vimeo/Private). You MUST provide cookies.txt."
             elif "Requested format is not available" in error_output:
                 error_summary = "Format Not Found. The link might be broken or not a video."
+            elif "no such option" in error_output:
+                 error_summary = "Configuration Error: Incompatible yt-dlp version"
             else:
                 lines = [line.strip() for line in error_output.split('\n') if line.strip()]
                 error_summary = lines[-1][:200] if lines else "Unknown Download Error"
@@ -290,7 +292,7 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V16*
+🤖 *UNIVERSAL Media Downloader Bot - V17*
 
 ✅ *Supported Sites:*
 • Supports almost all sites compatible with yt-dlp.
@@ -300,7 +302,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 2. The bot will download and send the file.
 
 ⚡ *Features:*
-✅ Optimized download parameters for stability.
+✅ Maximum download stability (Fixed V16 Parameter Error).
 ✅ Automatic file deletion after {DELETE_AFTER} minutes
 ✅ Max file size: {MAX_SIZE_MB}MB
 
@@ -391,6 +393,12 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ *Download Failed (404)*\n\n"
                 f"Error: `{result.replace('Download error: ', '')}`\n\n"
                 f"💡 *Solution:* The provided URL does not point to an existing file/page."
+            )
+        elif "Configuration Error" in result:
+            error_message = (
+                f"❌ *Configuration Error (yt-dlp)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* This indicates a serious compatibility issue. Please ensure all packages were installed and try running `python3 -m pip install --upgrade yt-dlp` manually."
             )
         else:
              error_message = (
@@ -496,7 +504,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE (V16)*
+🆘 *HELP GUIDE (V17)*
 
 📋 *How to Use:*
 1. Send any media URL.
@@ -524,7 +532,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS (V16)*
+📊 *BOT STATUS (V17)*
 
 🖥 *System:*
 • CPU: {cpu:.1f}%
@@ -532,7 +540,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
 🤖 *Bot:*
-• Version: V16 (Download Optimized)
+• Version: V17 (Final Stability)
 • Max size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} min
 • Status: ✅ Running
@@ -559,7 +567,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V16 (Starting)")
+    print("🤖 Telegram Media Downloader Bot - V17 (Starting)")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
@@ -675,10 +683,10 @@ sleep 3
 # ============================================
 echo ""
 echo "================================================"
-echo "🎉 INSTALLATION COMPLETE (V16 - DOWNLOAD OPTIMIZATION)"
+echo "🎉 INSTALLATION COMPLETE (V17 - FINAL STABILITY)"
 echo "================================================"
-echo "💡 The bot is running with maximum download stability."
-echo "✅ The remaining errors are most likely due to site restrictions (Cookies/Geo-Block)."
+echo "💡 The incompatible parameter has been removed."
+echo "✅ Bot should now download the links that previously worked."
 echo ""
 echo "⚙️ FINAL CHECK COMMANDS:"
 echo "------------------------------------------------"
@@ -687,4 +695,5 @@ echo "   systemctl status telegram-media-bot"
 echo "B) View Live Logs:"
 echo "   tail -f /opt/telegram-media-bot/logs/bot.log"
 echo "------------------------------------------------"
+echo "⚠️ *توجه مهم*: اگر خطاهای 'Access Denied' یا 'Login Required' باقی ماندند، حتماً نیاز به فایل *cookies.txt* در مسیر */opt/telegram-media-bot/cookies/* دارید."
 echo "================================================"
