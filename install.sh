@@ -1,62 +1,71 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V12 - English)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V13 - Full English)
 
-set -e
+set -e # Exit immediately if a command exits with a non-zero status
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V12)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V13)"
 echo "=============================================="
 echo ""
 
-# ... (بخش‌های چک روت، رنگ‌ها و پیام اولیه بدون تغییر) ...
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+# Helper functions
+print_status() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_error() { echo -e "${RED}[✗]${NC} $1"; }
+
+# Check root
+if [ "$EUID" -ne 0 ]; then
+    print_error "Please run as root: sudo bash install.sh"
+    exit 1
+fi
 
 # Ask for bot token
 echo "🔑 Enter your bot token from @BotFather:"
 read -p "📝 Bot token: " BOT_TOKEN
 
 if [ -z "$BOT_TOKEN" ]; then
-    echo -e "\033[0;31m[✗] Bot token is required!\033[0m"
+    print_error "Bot token is required!"
     exit 1
 fi
 
-echo -e "\033[0;32m[✓]\033[0m Starting installation on fresh server..."
+print_status "Starting installation process..."
 
 # ============================================
 # STEP 1: System Update & Essential Tools
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Updating system packages..."
-apt-get update
+print_status "Updating system packages..."
+apt-get update -y
 apt-get upgrade -y
 
-echo -e "\033[0;32m[✓]\033[0m Installing essential tools..."
+print_status "Installing essential tools..."
 apt-get install -y curl wget nano htop screen unzip pv git
 
 # ============================================
-# STEP 2: Install Python, PIP (FIXED), FFmpeg and Dependencies
+# STEP 2: Install Python, PIP, and FFmpeg
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Checking Python installation..."
+print_status "Checking Python installation..."
 
 if ! command -v python3 &> /dev/null; then
-    echo -e "\033[0;32m[✓]\033[0m Installing Python3..."
+    print_status "Installing Python3..."
     apt-get install -y python3
 fi
 
-# **FIXED:** Install python3-pip explicitly
 if ! command -v pip3 &> /dev/null; then
-    echo -e "\033[0;32m[✓]\033[0m Installing Python3-PIP (Package Installer)..."
+    print_status "Installing Python3-PIP (Package Installer)..."
     apt-get install -y python3-pip
 fi
 
-PYTHON_VERSION=$(python3 --version 2>&1)
-echo -e "\033[0;32m[✓]\033[0m Found $PYTHON_VERSION"
-
-echo -e "\033[0;32m[✓]\033[0m Installing FFmpeg..."
+print_status "Installing FFmpeg..."
 apt-get install -y ffmpeg
 
 # ============================================
 # STEP 3: Create Project Structure
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Creating project directory..."
+print_status "Creating project directory..."
 INSTALL_DIR="/opt/telegram-media-bot"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
@@ -65,9 +74,9 @@ mkdir -p downloads logs cookies tmp
 chmod 777 downloads logs cookies tmp
 
 # ============================================
-# STEP 4: Install Python Packages (Updated versions)
+# STEP 4: Install Python Packages
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Installing Python packages..."
+print_status "Installing Python packages..."
 
 cat > requirements.txt << 'REQEOF'
 python-telegram-bot>=20.7
@@ -81,12 +90,12 @@ REQEOF
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 
-echo -e "\033[0;32m[✓]\033[0m Core packages installed"
+print_status "Core packages installed successfully."
 
 # ============================================
 # STEP 5: Create Configuration
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Creating configuration files..."
+print_status "Creating configuration files..."
 
 cat > .env << ENVEOF
 BOT_TOKEN=${BOT_TOKEN}
@@ -95,18 +104,19 @@ DELETE_AFTER_MINUTES=2
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ENVEOF
 
-echo -e "\033[0;32m[✓]\033[0m Configuration created"
+print_status "Configuration created."
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - V12: Geo-Bypass Fix)
+# STEP 6: Create Bot File (bot.py - V13)
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Creating bot main file (bot.py - V12)..."
+print_status "Creating bot main file (bot.py - V13)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v12 - Geo-Bypass Fix)
-Fixed: 'no such option: --geo-bypass-resume' error.
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v13 - Geo-Bypass Fix and Full English)
+Fixed: 'no such option: --geo-bypass-resume' error (V12).
+Change: All comments and logs translated to English.
 """
 
 import os
@@ -139,8 +149,7 @@ MAX_SIZE_MB = int(os.getenv("MAX_FILE_SIZE", "2000"))
 USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 if not BOT_TOKEN:
-    print("ERROR: Please set BOT_TOKEN in .env file")
-    print("Edit: nano /opt/telegram-media-bot/.env")
+    print("ERROR: BOT_TOKEN is missing in .env file.")
     sys.exit(1)
 
 # Setup logging
@@ -191,9 +200,8 @@ def format_size(bytes_val):
         return "Unknown"
 
 async def download_video(url, output_path):
-    """Download video using yt-dlp with advanced options and format fallback"""
+    """Download video using yt-dlp with optimized options"""
     
-    # V11 Fix: Removed height filter and switched to a robust format
     download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
     
     cmd = [
@@ -225,7 +233,7 @@ async def download_video(url, output_path):
     if os.path.exists(cookies_file):
         cmd.extend(["--cookies", cookies_file])
     
-    logger.info(f"Running yt-dlp for: {url}")
+    logger.info(f"Initiating download for: {url}")
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -234,24 +242,25 @@ async def download_video(url, output_path):
             stderr=subprocess.PIPE
         )
         
-        # Increased timeout to 8 minutes (480 seconds)
+        # Timeout to prevent infinite hang
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=480) 
         except asyncio.TimeoutError:
             process.kill()
-            logger.error(f"Download Timeout: {url}")
+            logger.error(f"Download Timeout (480s) for: {url}")
             return False, "Timeout (8 minutes) - Server might be too slow or file too large."
         
         if process.returncode == 0:
+            logger.info(f"yt-dlp finished successfully for: {url}")
             return True, "Success"
         else:
             error_output = stderr.decode('utf-8', errors='ignore')
             
-            # --- Better Error Parsing (V11) ---
+            # --- Better Error Parsing (V13) ---
             error_summary = "Unknown Download Error"
             
             if "HTTP Error 403" in error_output or "Forbidden" in error_output or "Access Denied" in error_output or "HTTP Error 412" in error_output:
-                error_summary = "Access Denied (403/412/Blocked). Requires Cookies or Geo-bypass failed."
+                error_summary = "Access Denied (403/412/Blocked). Requires Cookies or Geo-bypass might have failed."
             elif "HTTP Error 404" in error_output or "NOT FOUND" in error_output:
                 error_summary = "File Not Found (404). Check URL validity."
             elif "logged-in" in error_output or "--cookies" in error_output:
@@ -272,37 +281,200 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V12*
+🤖 *UNIVERSAL Media Downloader Bot - V13*
 
 ✅ *Supported Sites:*
-• YouTube, TikTok, Instagram
-• Facebook, Twitter/X, Reddit
-• Pinterest, Vimeo, Dailymotion and many more!
+• Supports almost all sites compatible with yt-dlp.
 
 📝 *How to Use:*
 1. Send any media URL.
 2. The bot will download and send the file.
 
-⚡ *Features (V12 Update):*
-✅ Fixed Geo-bypass error.
-✅ Optimized format detection.
-✅ Enhanced access handling.
+⚡ *Features:*
+✅ Optimized for format and access errors.
 ✅ Automatic file deletion after {DELETE_AFTER} minutes
 ✅ Max file size: {MAX_SIZE_MB}MB
 
-🍪 *Cookie Setup (CRITICAL for Vimeo/403/412):*
-For sites requiring login or access (Vimeo, Private content, BiliBili):
+🍪 *Cookie Setup (CRITICAL for Access):*
+For links requiring login or restricted access:
 Place your `cookies.txt` file here:
 `/opt/telegram-media-bot/cookies/`
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
-# ... (سایر توابع مانند handle_url، help_command، status_command و main بدون تغییر باقی می‌مانند) ...
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle URL messages"""
+    original_text = update.message.text
+    url = clean_url(original_text)
+    
+    if not url:
+        await update.message.reply_text(
+            "❌ *Invalid URL*\nPlease send a valid URL starting with http:// or https://",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Detect site
+    try:
+        parsed = urlparse(url)
+        site_name = parsed.netloc.split('.')[-2] if parsed.netloc.count('.') >= 2 else parsed.netloc.split('.')[0]
+        site = site_name.replace('www.', '').split(':')[0]
+    except:
+        site = "Unknown"
+    
+    # Initial message
+    msg = await update.message.reply_text(
+        f"🔗 *Processing URL*\n\n"
+        f"Site: *{site.upper()}*\n"
+        f"URL: `{url[:50]}...`\n\n"
+        f"Starting download...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = site 
+    filename = f"{safe_name}_{timestamp}"
+    output_template = f"downloads/{filename}.%(ext)s"
+    
+    # Download
+    await msg.edit_text(
+        f"📥 *Downloading...*\n\n"
+        f"Site: {site.upper()}\n"
+        f"Please wait (Max 8 minutes)...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    success, result = await download_video(url, output_template)
+    
+    # If download fails, report error with more details
+    if not success:
+        
+        if "Login Required" in result:
+             error_message = (
+                f"❌ *Download Failed (Login Required)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* This link is private or requires login.\n"
+                f"Please place your `cookies.txt` file in `/opt/telegram-media-bot/cookies/`."
+            )
+        elif "Access Denied" in result:
+            error_message = (
+                f"❌ *Download Failed (Access Blocked)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* Server rejected access (403/412).\n"
+                f"If the link is public, check network access or provide `cookies.txt`."
+            )
+        elif "File Not Found" in result:
+            error_message = (
+                f"❌ *Download Failed (404)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* The provided URL does not point to an existing file/page."
+            )
+        else:
+             error_message = (
+                f"❌ *Download Failed*\n\n"
+                f"Error: `{result}`\n\n"
+                f"Possible reasons:\n"
+                f"• URL is inaccessible or broken.\n"
+                f"• Cookies file (`cookies.txt`) is required.\n"
+                f"• Content is restricted (Geo/Private)."
+            )
+
+        await msg.edit_text(error_message, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    # Find downloaded file
+    downloaded_files = list(Path("downloads").glob(f"{filename}.*"))
+    downloaded_files.sort(key=lambda p: p.stat().st_size, reverse=True)
+    
+    if not downloaded_files:
+        await msg.edit_text(
+            "❌ Download completed but the final file was not found.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    file_path = downloaded_files[0]
+    file_size = file_path.stat().st_size
+    
+    # Check size
+    if file_size > (MAX_SIZE_MB * 1024 * 1024):
+        # Clean up all related downloaded files
+        for p in downloaded_files:
+            if p.exists():
+                p.unlink()
+        
+        await msg.edit_text(
+            f"❌ *File Too Large*\n\n"
+            f"Size: {format_size(file_size)}\n"
+            f"Limit: {MAX_SIZE_MB}MB",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Upload to Telegram
+    await msg.edit_text(
+        f"📤 *Uploading...*\n\n"
+        f"File: {file_path.name}\n"
+        f"Size: {format_size(file_size)}\n\n"
+        f"This may take a moment...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        with open(file_path, 'rb') as file:
+            file_ext = file_path.suffix.lower()
+            caption_text = (
+                f"✅ *Download Complete!*\n\n"
+                f"Site: {site.upper()}\n"
+                f"Size: {format_size(file_size)}\n"
+                f"Auto-deletes in {DELETE_AFTER} minutes"
+            )
+            
+            # Smart media type detection
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                await update.message.reply_photo(photo=file, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
+            elif file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']:
+                await update.message.reply_audio(audio=file, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
+            else: # Default to video (covers mp4, webm, etc.)
+                await update.message.reply_video(
+                    video=file, 
+                    caption=caption_text, 
+                    parse_mode=ParseMode.MARKDOWN,
+                    supports_streaming=True
+                )
+        
+        # Final status update
+        await msg.edit_text(
+            f"🎉 *SUCCESS!*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Auto delete after delay
+        async def delete_files_after_delay():
+            await asyncio.sleep(DELETE_AFTER * 60)
+            for p in downloaded_files:
+                if p.exists():
+                    try:
+                        p.unlink()
+                        logger.info(f"Auto-deleted file: {p.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {p.name}: {e}")
+
+        asyncio.create_task(delete_files_after_delay())
+        
+    except Exception as upload_error:
+        logger.error(f"Upload error: {upload_error}")
+        await msg.edit_text(
+            f"❌ *Upload Failed*\n\n"
+            f"Error: {str(upload_error)[:200]}",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE (V12)*
+🆘 *HELP GUIDE (V13)*
 
 📋 *How to Use:*
 1. Send any media URL.
@@ -314,8 +486,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Almost all sites supported by yt-dlp.
 
 ⚙️ *Cookie Setup (CRITICAL for Access):*
-To bypass login/access errors (like Vimeo login or BiliBili 412), you need a `cookies.txt` file.
-Place it in: `/opt/telegram-media-bot/cookies/`
+To bypass login/access errors, place your `cookies.txt` file in: `/opt/telegram-media-bot/cookies/`
 
 📏 *Limits:*
 - Max file size: {MAX_SIZE_MB}MB
@@ -331,7 +502,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS (V12)*
+📊 *BOT STATUS (V13)*
 
 🖥 *System:*
 • CPU: {cpu:.1f}%
@@ -339,7 +510,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
 🤖 *Bot:*
-• Version: V12 (Geo-Bypass Fix)
+• Version: V13 (Full English, Execution Optimized)
 • Max size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} min
 • Status: ✅ Running
@@ -351,15 +522,25 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors"""
+    logger.error(f"Unhandled error: {context.error}")
+    if update and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "❌ An internal error occurred. Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}")
 
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V12 (Geo-Bypass Fix)")
+    print("🤖 Telegram Media Downloader Bot - V13 (Starting)")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
-    print(f"Auto-delete: {DELETE_AFTER} minutes")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -370,14 +551,18 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     app.add_error_handler(error_handler)
     
-    print("✅ Bot starting...")
-    print("📱 Send /start to your bot")
-    print("🔗 Send any URL to download")
+    print("✅ Bot polling started...")
     
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True
-    )
+    try:
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            timeout=30 # Increased timeout for initial connection
+        )
+    except Exception as e:
+        logger.critical(f"Bot failed to start polling: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     if not os.access(__file__, os.X_OK):
@@ -392,9 +577,11 @@ PYEOF
 chmod +x bot.py
 
 # ============================================
-# STEP 7: Create Systemd Service (V12 Change: ExecStart updated to use python3)
+# STEP 7: Create Systemd Service (V13 Change: ExecStart points directly to python3 path)
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Creating systemd service..."
+print_status "Creating systemd service..."
+# Find the exact path of python3
+PYTHON_PATH=$(which python3)
 
 cat > /etc/systemd/system/telegram-media-bot.service << SERVICEEOF
 [Unit]
@@ -407,7 +594,7 @@ Restart=always
 RestartSec=10
 User=root
 WorkingDirectory=/opt/telegram-media-bot
-ExecStart=/usr/bin/python3 /opt/telegram-media-bot/bot.py
+ExecStart=${PYTHON_PATH} /opt/telegram-media-bot/bot.py
 StandardOutput=append:/opt/telegram-media-bot/logs/bot.log
 StandardError=append:/opt/telegram-media-bot/logs/bot-error.log
 Environment=PYTHONUNBUFFERED=1
@@ -422,14 +609,42 @@ systemctl enable telegram-media-bot.service
 # ============================================
 # STEP 8: Create Management Scripts
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Creating management scripts..."
+print_status "Creating management scripts..."
 
-# ... (سایر اسکریپت‌های مدیریت بدون تغییر) ...
+cat > start-bot.sh << 'EOF'
+#!/bin/bash
+systemctl start telegram-media-bot.service
+echo "Bot started"
+EOF
+
+cat > stop-bot.sh << 'EOF'
+#!/bin/bash
+systemctl stop telegram-media-bot.service
+echo "Bot stopped"
+EOF
+
+cat > restart-bot.sh << 'EOF'
+#!/bin/bash
+systemctl restart telegram-media-bot.service
+echo "Bot restarted"
+EOF
+
+cat > bot-status.sh << 'EOF'
+#!/bin/bash
+systemctl status telegram-media-bot.service
+EOF
+
+cat > bot-logs.sh << 'EOF'
+#!/bin/bash
+tail -f /opt/telegram-media-bot/logs/bot.log
+EOF
+
+chmod +x *.sh
 
 # ============================================
 # STEP 9: Start Service
 # ============================================
-echo -e "\033[0;32m[✓]\033[0m Starting bot service..."
+print_status "Starting bot service..."
 systemctl start telegram-media-bot.service
 sleep 3
 
@@ -437,11 +652,19 @@ sleep 3
 # STEP 10: Show Final Instructions
 # ============================================
 echo ""
-echo "=============================================="
-echo "🎉 INSTALLATION COMPLETE (V12)"
-echo "=============================================="
-echo "✅ مشکل geo-bypass-resume حل شد."
-echo "✅ ربات برای استفاده از yt-dlp نصب شده توسط pip بهینه شد."
-echo "💡 *مهم:* برای خطاهای لاگین/403/412، کوکی‌ها ضروری هستند."
-echo "🍪 /opt/telegram-media-bot/cookies/cookies.txt"
-echo "=============================================="
+echo "================================================"
+echo "🎉 INSTALLATION COMPLETE (V13 - Full English)"
+echo "================================================"
+echo "💡 The bot is now running as a service."
+echo "✅ Next Steps:"
+echo "1. Send /start to your bot in Telegram."
+echo "2. If there is no response, check the status and logs below."
+echo ""
+echo "⚙️ TROUBLESHOOTING COMMANDS:"
+echo "------------------------------------------------"
+echo "A) Check Service Status:"
+echo "   systemctl status telegram-media-bot"
+echo "B) View Live Logs (Crucial for debugging):"
+echo "   tail -f /opt/telegram-media-bot/logs/bot.log"
+echo "------------------------------------------------"
+echo "================================================"
