@@ -1,10 +1,10 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V14 - Full English)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V15 - Final Fix)
 
 set -e # Exit immediately if a command exits with a non-zero status
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V14)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V15)"
 echo "=============================================="
 echo ""
 
@@ -112,15 +112,15 @@ ENVEOF
 print_status "Configuration created."
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - V14: Geo/XFF Fix)
+# STEP 6: Create Bot File (bot.py - V15: NameError Fix)
 # ============================================
-print_status "Creating bot main file (bot.py - V14)..."
+print_status "Creating bot main file (bot.py - V15)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v14 - Geo/XFF Fix)
-Fixed: 'Unsupported --xff' error by removing geo-bypass options.
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v15 - NameError Fix)
+Fixed: Missing 'handle_url' function definition.
 """
 
 import os
@@ -204,12 +204,11 @@ def format_size(bytes_val):
         return "Unknown"
 
 async def download_video(url, output_path):
-    """Download video using yt-dlp with optimized options"""
+    """Download video using yt-dlp with optimized options (V14/V15)"""
     
     download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
     
     cmd = [
-        # Use 'python3 -m yt_dlp' to ensure using pip-installed version
         "python3", "-m", "yt_dlp",
         "-f", download_format, 
         "-o", output_path,
@@ -218,16 +217,16 @@ async def download_video(url, output_path):
         "--no-playlist",
         "--concurrent-fragments", "4",
         "--limit-rate", "10M",
-        # --- Advanced Options for stability and bypassing blocks ---
+        # --- Advanced Options for stability ---
         "--retries", "15",
         "--fragment-retries", "15",
         "--buffer-size", "256K",
         "--user-agent", USER_AGENT, 
-        # V14 FIX: Removed geo-bypass options to resolve '--xff' error
+        # V14 FIX: Removed geo-bypass options to resolve Geo/XFF error
         "--no-check-certificate", 
         "--referer", "https://google.com/",
         "--http-chunk-size", "10M",
-        # ----------------------------------------------------------------
+        # ------------------------------------
         url
     ]
     
@@ -284,7 +283,7 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V14*
+🤖 *UNIVERSAL Media Downloader Bot - V15*
 
 ✅ *Supported Sites:*
 • Supports almost all sites compatible with yt-dlp.
@@ -294,8 +293,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 2. The bot will download and send the file.
 
 ⚡ *Features:*
-✅ Fixed Geo/XFF error by optimizing command line options.
-✅ Optimized format detection.
+✅ Fully functional core after NameError fix.
 ✅ Automatic file deletion after {DELETE_AFTER} minutes
 ✅ Max file size: {MAX_SIZE_MB}MB
 
@@ -306,12 +304,179 @@ Place your `cookies.txt` file here:
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
-# ... (سایر توابع بدون تغییر باقی می‌مانند) ...
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle URL messages - V15: This function was missing!"""
+    original_text = update.message.text
+    url = clean_url(original_text)
+    
+    if not url:
+        await update.message.reply_text(
+            "❌ *Invalid URL*\nPlease send a valid URL starting with http:// or https://",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Detect site
+    try:
+        parsed = urlparse(url)
+        site_name = parsed.netloc.split('.')[-2] if parsed.netloc.count('.') >= 2 else parsed.netloc.split('.')[0]
+        site = site_name.replace('www.', '').split(':')[0]
+    except:
+        site = "Unknown"
+    
+    # Initial message
+    msg = await update.message.reply_text(
+        f"🔗 *Processing URL*\n\n"
+        f"Site: *{site.upper()}*\n"
+        f"URL: `{url[:50]}...`\n\n"
+        f"Starting download...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = site 
+    filename = f"{safe_name}_{timestamp}"
+    output_template = f"downloads/{filename}.%(ext)s"
+    
+    # Download
+    await msg.edit_text(
+        f"📥 *Downloading...*\n\n"
+        f"Site: {site.upper()}\n"
+        f"Please wait (Max 8 minutes)...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    success, result = await download_video(url, output_template)
+    
+    # If download fails, report error with more details
+    if not success:
+        
+        if "Login Required" in result:
+             error_message = (
+                f"❌ *Download Failed (Login Required)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* This link is private or requires login.\n"
+                f"Please place your `cookies.txt` file in `/opt/telegram-media-bot/cookies/`."
+            )
+        elif "Access Denied" in result:
+            error_message = (
+                f"❌ *Download Failed (Access Blocked)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* Server rejected access (403/412).\n"
+                f"If the link is public, check network access or provide `cookies.txt`."
+            )
+        elif "File Not Found" in result:
+            error_message = (
+                f"❌ *Download Failed (404)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* The provided URL does not point to an existing file/page."
+            )
+        else:
+             error_message = (
+                f"❌ *Download Failed*\n\n"
+                f"Error: `{result}`\n\n"
+                f"Possible reasons:\n"
+                f"• URL is inaccessible or broken.\n"
+                f"• Cookies file (`cookies.txt`) is required.\n"
+                f"• Content is restricted (Geo/Private)."
+            )
+
+        await msg.edit_text(error_message, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    # Find downloaded file
+    downloaded_files = list(Path("downloads").glob(f"{filename}.*"))
+    downloaded_files.sort(key=lambda p: p.stat().st_size, reverse=True)
+    
+    if not downloaded_files:
+        await msg.edit_text(
+            "❌ Download completed but the final file was not found.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    file_path = downloaded_files[0]
+    file_size = file_path.stat().st_size
+    
+    # Check size
+    if file_size > (MAX_SIZE_MB * 1024 * 1024):
+        # Clean up all related downloaded files
+        for p in downloaded_files:
+            if p.exists():
+                p.unlink()
+        
+        await msg.edit_text(
+            f"❌ *File Too Large*\n\n"
+            f"Size: {format_size(file_size)}\n"
+            f"Limit: {MAX_SIZE_MB}MB",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Upload to Telegram
+    await msg.edit_text(
+        f"📤 *Uploading...*\n\n"
+        f"File: {file_path.name}\n"
+        f"Size: {format_size(file_size)}\n\n"
+        f"This may take a moment...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        with open(file_path, 'rb') as file:
+            file_ext = file_path.suffix.lower()
+            caption_text = (
+                f"✅ *Download Complete!*\n\n"
+                f"Site: {site.upper()}\n"
+                f"Size: {format_size(file_size)}\n"
+                f"Auto-deletes in {DELETE_AFTER} minutes"
+            )
+            
+            # Smart media type detection
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                await update.message.reply_photo(photo=file, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
+            elif file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']:
+                await update.message.reply_audio(audio=file, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
+            else: # Default to video (covers mp4, webm, etc.)
+                await update.message.reply_video(
+                    video=file, 
+                    caption=caption_text, 
+                    parse_mode=ParseMode.MARKDOWN,
+                    supports_streaming=True
+                )
+        
+        # Final status update
+        await msg.edit_text(
+            f"🎉 *SUCCESS!*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Auto delete after delay
+        async def delete_files_after_delay():
+            await asyncio.sleep(DELETE_AFTER * 60)
+            for p in downloaded_files:
+                if p.exists():
+                    try:
+                        p.unlink()
+                        logger.info(f"Auto-deleted file: {p.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {p.name}: {e}")
+
+        asyncio.create_task(delete_files_after_delay())
+        
+    except Exception as upload_error:
+        logger.error(f"Upload error: {upload_error}")
+        await msg.edit_text(
+            f"❌ *Upload Failed*\n\n"
+            f"Error: {str(upload_error)[:200]}",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE (V14)*
+🆘 *HELP GUIDE (V15)*
 
 📋 *How to Use:*
 1. Send any media URL.
@@ -339,7 +504,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS (V14)*
+📊 *BOT STATUS (V15)*
 
 🖥 *System:*
 • CPU: {cpu:.1f}%
@@ -347,7 +512,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
 🤖 *Bot:*
-• Version: V14 (Geo/XFF Fix)
+• Version: V15 (NameError Fixed)
 • Max size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} min
 • Status: ✅ Running
@@ -374,7 +539,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V14 (Starting)")
+    print("🤖 Telegram Media Downloader Bot - V15 (Starting)")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
@@ -382,6 +547,7 @@ def main():
     
     app = Application.builder().token(BOT_TOKEN).build()
     
+    # V15 FIX: handle_url is now defined above this point
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
@@ -414,7 +580,7 @@ PYEOF
 chmod +x bot.py
 
 # ============================================
-# STEP 7: Create Systemd Service (V14 - No Change)
+# STEP 7: Create Systemd Service (No Change)
 # ============================================
 print_status "Creating systemd service..."
 # Find the exact path of python3
@@ -490,16 +656,14 @@ sleep 3
 # ============================================
 echo ""
 echo "================================================"
-echo "🎉 INSTALLATION COMPLETE (V14 - Geo/XFF Fix)"
+echo "🎉 INSTALLATION COMPLETE (V15 - FINAL CODE FIX)"
 echo "================================================"
-echo "💡 The bot is now running as a service."
-echo "✅ Next Steps:"
-echo "1. Send /start to your bot in Telegram."
-echo "2. If still no response, check the status and logs below."
+echo "💡 The NameError (handle_url) has been resolved."
+echo "✅ The bot should now be fully functional."
 echo ""
-echo "⚙️ TROUBLESHOOTING COMMANDS:"
+echo "⚙️ FINAL CHECK COMMANDS:"
 echo "------------------------------------------------"
-echo "A) Check Service Status (CRITICAL):"
+echo "A) Check Service Status:"
 echo "   systemctl status telegram-media-bot"
 echo "B) View Live Logs:"
 echo "   tail -f /opt/telegram-media-bot/logs/bot.log"
