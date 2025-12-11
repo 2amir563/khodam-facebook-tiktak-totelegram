@@ -1,11 +1,11 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers
-# Compatible with Ubuntu/Debian fresh installations (Modified Version)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V9 - English)
+# Compatible with Ubuntu/Debian fresh installations
 
 set -e # Exit on error
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V8)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V9)"
 echo "=============================================="
 echo ""
 
@@ -49,14 +49,20 @@ print_status "Installing essential tools..."
 apt-get install -y curl wget nano htop screen unzip pv git
 
 # ============================================
-# STEP 2: Install Python, FFmpeg and Dependencies
+# STEP 2: Install Python, PIP (FIXED), FFmpeg and Dependencies
 # ============================================
 print_status "Checking Python installation..."
 
 # Install Python if not exists
 if ! command -v python3 &> /dev/null; then
     print_status "Installing Python3..."
-    apt-get install -y python3 python3-pip
+    apt-get install -y python3
+fi
+
+# **FIXED:** Install python3-pip explicitly
+if ! command -v pip3 &> /dev/null; then
+    print_status "Installing Python3-PIP (Package Installer)..."
+    apt-get install -y python3-pip
 fi
 
 # Check Python version
@@ -77,21 +83,21 @@ cd "$INSTALL_DIR"
 
 # Create directories
 mkdir -p downloads logs cookies tmp
-chmod 777 downloads logs cookies tmp # Increased permissions for easier debugging
+chmod 777 downloads logs cookies tmp # Set full permissions
 
 # ============================================
-# STEP 4: Install Python Packages (Updated with psutil)
+# STEP 4: Install Python Packages (Updated versions)
 # ============================================
 print_status "Installing Python packages..."
 
-# Create requirements file with *LATEST* versions for better compatibility
+# Create requirements file with LATEST versions
 cat > requirements.txt << 'REQEOF'
 python-telegram-bot>=20.7
 python-dotenv>=1.0.0
-yt-dlp>=2024.4.9 # Using a recent version
+yt-dlp>=2024.4.9
 aiofiles>=23.2.1
 requests>=2.31.0
-psutil>=5.9.8 # Added for /status command
+psutil>=5.9.8
 REQEOF
 
 # Install packages
@@ -105,7 +111,7 @@ print_status "✅ Core packages installed"
 # ============================================
 print_status "Creating configuration files..."
 
-# Create .env file
+# Create .env file with advanced settings for yt-dlp
 cat > .env << ENVEOF
 BOT_TOKEN=${BOT_TOKEN}
 MAX_FILE_SIZE=2000
@@ -117,17 +123,15 @@ ENVEOF
 print_status "✅ Configuration created"
 
 # ============================================
-# STEP 6: Create Bot File (Writing the full, updated bot.py)
+# STEP 6: Create Bot File (bot.py - English and Error-Optimized)
 # ============================================
 print_status "Creating bot main file (bot.py)..."
-
-# --- Start of the main bot.py content ---
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v8 - Optimized for Access/Errors)
-Fixed installation issues - Simple and reliable
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v9 - Optimized for Access/Errors)
+Fixes common installation errors and improves download stability.
 """
 
 import os
@@ -140,7 +144,7 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse, unquote
 
-import psutil # For /status command
+import psutil 
 from telegram import Update
 from telegram.ext import (
     Application, 
@@ -157,7 +161,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DELETE_AFTER = int(os.getenv("DELETE_AFTER_MINUTES", "2"))
 MAX_SIZE_MB = int(os.getenv("MAX_FILE_SIZE", "2000"))
-USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; My-TG-Bot/1.0)") # Use a better default
+USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; My-TG-Bot/1.0)")
 
 if not BOT_TOKEN:
     print("ERROR: Please set BOT_TOKEN in .env file")
@@ -181,8 +185,6 @@ def clean_url(text):
         return None
     
     text = text.strip()
-    
-    # Find URL pattern (modified to be more flexible)
     url_pattern = r'(https?://[^\s<>"\']+|www\.[^\s<>"\']+\.[a-z]{2,})'
     matches = re.findall(url_pattern, text, re.IGNORECASE)
     
@@ -191,7 +193,6 @@ def clean_url(text):
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
             
-        # Clean URL
         url = re.sub(r'[.,;:!?]+$', '', url)
         url = unquote(url)
         
@@ -219,7 +220,6 @@ async def download_video(url, output_path):
     try:
         cmd = [
             "yt-dlp",
-            # Use format best[height<=720]/best (Keep existing)
             "-f", "best[height<=720]/best", 
             "-o", output_path,
             "--no-warnings",
@@ -228,11 +228,11 @@ async def download_video(url, output_path):
             "--concurrent-fragments", "2",
             "--limit-rate", "5M",
             # --- Advanced Options for stability and bypassing blocks ---
-            "--retries", "3", # Retry up to 3 times on temporary network errors
-            "--buffer-size", "128K", # Set buffer size
-            "--user-agent", USER_AGENT, # Set the user agent from .env
-            "--geo-bypass", # Bypass geographic restrictions
-            "--no-check-certificate", # Ignore SSL certificate errors (helpful sometimes)
+            "--retries", "3", 
+            "--buffer-size", "128K", 
+            "--user-agent", USER_AGENT, 
+            "--geo-bypass", 
+            "--no-check-certificate", 
             # -----------------------------------------------------------
             url
         ]
@@ -250,7 +250,7 @@ async def download_video(url, output_path):
             stderr=subprocess.PIPE
         )
         
-        # Increased timeout to 5 minutes (300 seconds)
+        # Increased timeout to 6.6 minutes (400 seconds)
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=400) 
         except asyncio.TimeoutError:
@@ -262,15 +262,19 @@ async def download_video(url, output_path):
             return True, "Success"
         else:
             error_output = stderr.decode('utf-8', errors='ignore')
-            # Look for specific error lines
+            
+            # --- Better Error Parsing ---
+            error_summary = "Unknown Download Error"
             if "HTTP Error 403" in error_output or "Forbidden" in error_output or "Blocked" in error_output:
                 error_summary = "Access Denied (403/Blocked). Try adding cookies.txt."
             elif "HTTP Error 404" in error_output or "NOT FOUND" in error_output:
                 error_summary = "File Not Found (404). Check URL validity."
             elif "KeyError" in error_output:
-                error_summary = "Extractor Error (KeyError). Try updating yt-dlp or report bug."
+                error_summary = "Extractor Error (KeyError). Try updating yt-dlp."
             else:
-                error_summary = error_output.split('\n')[-2].strip()[:200] if error_output.strip() else "Unknown Download Error"
+                 # Attempt to extract the last meaningful error line from yt-dlp
+                lines = [line.strip() for line in error_output.split('\n') if line.strip()]
+                error_summary = lines[-1][:200] if lines else "Unknown Download Error"
 
             logger.error(f"yt-dlp failed for {url}: {error_output}")
             return False, f"Download error: {error_summary}"
@@ -282,25 +286,25 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V8*
+🤖 *UNIVERSAL Media Downloader Bot - V9*
 
-✅ *سایت‌های پشتیبانی شده:*
-• یوتیوب، تیک‌تاک، اینستاگرام
-• فیس‌بوک، توییتر/ایکس، ردیت
-• پینترست، ویمئو، دِیلی‌موشن و بسیاری دیگر!
+✅ *Supported Sites:*
+• YouTube, TikTok, Instagram
+• Facebook, Twitter/X, Reddit
+• Pinterest, Vimeo, Dailymotion and many more!
 
-📝 *نحوه استفاده:*
-1. هر URL رسانه‌ای را بفرستید.
-2. ربات دانلود کرده و فایل را ارسال می‌کند.
+📝 *How to Use:*
+1. Send any media URL.
+2. The bot will download and send the file.
 
-⚡ *ویژگی‌ها:*
-✅ دانلود خودکار و سریع
-✅ نمایش حجم فایل
-✅ حذف خودکار فایل‌ها پس از {DELETE_AFTER} دقیقه
-✅ حداکثر حجم فایل: {MAX_SIZE_MB}MB
+⚡ *Features:*
+✅ Automatic and fast downloading
+✅ File size display
+✅ Automatic file deletion after {DELETE_AFTER} minutes
+✅ Max file size: {MAX_SIZE_MB}MB
 
-🍪 *تنظیم کوکی:*
-برای سایت‌هایی مانند اینستاگرام، پینترست و ردیت (برای دور زدن محدودیت‌های ۴۰۳)، فایل `cookies.txt` را در مسیر زیر قرار دهید:
+🍪 *Cookie Setup:*
+For sites with access restrictions (like Pinterest/Reddit, often causing 403 errors), please place your `cookies.txt` file here:
 `/opt/telegram-media-bot/cookies/`
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
@@ -312,7 +316,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not url:
         await update.message.reply_text(
-            "❌ *URL نامعتبر*\nلطفاً یک URL معتبر که با http:// یا https:// شروع می‌شود ارسال کنید.",
+            "❌ *Invalid URL*\nPlease send a valid URL starting with http:// or https://",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -327,25 +331,24 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Initial message
     msg = await update.message.reply_text(
-        f"🔗 *در حال پردازش URL*\n\n"
-        f"سایت: *{site.upper()}*\n"
+        f"🔗 *Processing URL*\n\n"
+        f"Site: *{site.upper()}*\n"
         f"URL: `{url[:50]}...`\n\n"
-        f"شروع دانلود...",
+        f"Starting download...",
         parse_mode=ParseMode.MARKDOWN
     )
     
     # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Use only the domain name for safe_name for simplicity
     safe_name = site 
     filename = f"{safe_name}_{timestamp}"
     output_template = f"downloads/{filename}.%(ext)s"
     
     # Download
     await msg.edit_text(
-        f"📥 *در حال دانلود...*\n\n"
-        f"سایت: {site.upper()}\n"
-        f"لطفاً منتظر بمانید...",
+        f"📥 *Downloading...*\n\n"
+        f"Site: {site.upper()}\n"
+        f"Please wait...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -354,26 +357,23 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If download fails, report error with more details
     if not success:
         await msg.edit_text(
-            f"❌ *دانلود ناموفق*\n\n"
-            f"خطا: `{result}`\n\n"
-            f"دلایل احتمالی:\n"
-            f"• URL در دسترس نیست.\n"
-            f"• نیاز به فایل `cookies.txt` برای این سایت است (مانند Pinterest/Reddit).\n"
-            f"• محتوای محدود شده (Region/Private).",
+            f"❌ *Download Failed*\n\n"
+            f"Error: `{result}`\n\n"
+            f"Possible reasons:\n"
+            f"• URL is inaccessible.\n"
+            f"• Cookies file (`cookies.txt`) is required for this site.\n"
+            f"• Content is restricted (Geo/Private).",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
     # Find downloaded file
-    # glob to find all files starting with our prefix
     downloaded_files = list(Path("downloads").glob(f"{filename}.*"))
-    
-    # Sort files to potentially find the main video/media file first
     downloaded_files.sort(key=lambda p: p.stat().st_size, reverse=True)
     
     if not downloaded_files:
         await msg.edit_text(
-            "❌ دانلود تکمیل شد اما فایل نهایی پیدا نشد.",
+            "❌ Download completed but the final file was not found.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -389,19 +389,19 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p.unlink()
         
         await msg.edit_text(
-            f"❌ *فایل بیش از حد بزرگ است*\n\n"
-            f"حجم: {format_size(file_size)}\n"
-            f"محدودیت: {MAX_SIZE_MB}MB",
+            f"❌ *File Too Large*\n\n"
+            f"Size: {format_size(file_size)}\n"
+            f"Limit: {MAX_SIZE_MB}MB",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
     # Upload to Telegram
     await msg.edit_text(
-        f"📤 *در حال آپلود...*\n\n"
-        f"فایل: {file_path.name}\n"
-        f"حجم: {format_size(file_size)}\n\n"
-        f"این ممکن است کمی طول بکشد...",
+        f"📤 *Uploading...*\n\n"
+        f"File: {file_path.name}\n"
+        f"Size: {format_size(file_size)}\n\n"
+        f"This may take a moment...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -409,10 +409,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(file_path, 'rb') as file:
             file_ext = file_path.suffix.lower()
             caption_text = (
-                f"✅ *دانلود موفقیت‌آمیز!*\n\n"
-                f"سایت: {site.upper()}\n"
-                f"حجم: {format_size(file_size)}\n"
-                f"حذف خودکار پس از {DELETE_AFTER} دقیقه"
+                f"✅ *Download Complete!*\n\n"
+                f"Site: {site.upper()}\n"
+                f"Size: {format_size(file_size)}\n"
+                f"Auto-deletes in {DELETE_AFTER} minutes"
             )
             
             # Smart media type detection
@@ -430,11 +430,11 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Final status update
         await msg.edit_text(
-            f"🎉 *عملیات موفقیت‌آمیز!*\n\n"
-            f"✅ فایل دانلود و ارسال شد!\n"
-            f"📊 حجم: {format_size(file_size)}\n"
-            f"⏰ حذف خودکار در {DELETE_AFTER} دقیقه\n\n"
-            f"آماده برای URL بعدی!",
+            f"🎉 *SUCCESS!*\n\n"
+            f"✅ File downloaded and sent!\n"
+            f"📊 Size: {format_size(file_size)}\n"
+            f"⏰ Auto-deletes in {DELETE_AFTER} minutes\n\n"
+            f"Ready for next URL!",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -454,31 +454,32 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as upload_error:
         logger.error(f"Upload error: {upload_error}")
         await msg.edit_text(
-            f"❌ *آپلود ناموفق*\n\n"
-            f"خطا: {str(upload_error)[:200]}",
+            f"❌ *Upload Failed*\n\n"
+            f"Error: {str(upload_error)[:200]}",
             parse_mode=ParseMode.MARKDOWN
         )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *راهنمای کمک*
+🆘 *HELP GUIDE*
 
-📋 *نحوه استفاده:*
-1. URL رسانه‌ای را ارسال کنید.
-2. ربات دانلود کرده و فایل را ارسال می‌کند.
+📋 *How to Use:*
+1. Send any media URL.
+2. The bot automatically handles the download.
+3. Receive the file in Telegram.
+4. Files are auto-deleted after {DELETE_AFTER} minutes.
 
-🌐 *سایت‌های پشتیبانی شده:*
-- تقریباً تمام سایت‌هایی که توسط yt-dlp پشتیبانی می‌شوند (مانند YouTube, TikTok, Reddit, Pinterest, Vimeo).
+🌐 *Supported Sites:*
+- Almost all sites supported by yt-dlp (e.g., YouTube, TikTok, Reddit, Pinterest, Vimeo).
 
-⚙️ *تنظیم کوکی:*
-برای رفع خطاهای دسترسی (مانند ۴۰۳ در Pinterest/Reddit) نیاز است.
-فایل `cookies.txt` را در مسیر زیر قرار دهید:
-`/opt/telegram-media-bot/cookies/`
+⚙️ *Cookie Setup:*
+To bypass access errors (like 403 on Pinterest/Reddit), you need a `cookies.txt` file.
+Place it in: `/opt/telegram-media-bot/cookies/`
 
-📏 *محدودیت‌ها:*
-- حداکثر حجم فایل: {MAX_SIZE_MB}MB
-- حذف خودکار: {DELETE_AFTER} دقیقه
+📏 *Limits:*
+- Max file size: {MAX_SIZE_MB}MB
+- Auto-delete: {DELETE_AFTER} minutes
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -490,34 +491,33 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *وضعیت ربات*
+📊 *BOT STATUS*
 
-🖥 *سیستم:*
+🖥 *System:*
 • CPU: {cpu:.1f}%
-• RAM: {memory.percent:.1f}% ({format_size(memory.available)} آزاد)
-• دیسک: {disk.percent:.1f}% ({format_size(disk.free)} آزاد)
+• RAM: {memory.percent:.1f}% ({format_size(memory.available)} Free)
+• Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
-🤖 *ربات:*
-• نسخه: V8 (Optimized)
-• حداکثر حجم: {MAX_SIZE_MB}MB
-• حذف خودکار: {DELETE_AFTER} دقیقه
-• وضعیت: ✅ فعال
+🤖 *Bot:*
+• Version: V9 (Optimized)
+• Max size: {MAX_SIZE_MB}MB
+• Auto-delete: {DELETE_AFTER} min
+• Status: ✅ Running
 
-💡 *دستورات سریع:*
-/start - پیام خوش‌آمد
-/help - راهنما
-/status - وضعیت ربات
+💡 *Quick Commands:*
+/start - Welcome message
+/help - Guide
+/status - Bot status
 """
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
     logger.error(f"Unhandled error: {context.error}")
-    # Prevent sending reply if the original message is already gone or in an invalid state
     if update and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "❌ یک خطای داخلی رخ داد. لطفاً دوباره تلاش کنید.",
+                "❌ An internal error occurred. Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
@@ -526,17 +526,15 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V8")
+    print("🤖 Telegram Media Downloader Bot - V9")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
     print(f"Auto-delete: {DELETE_AFTER} minutes")
     print("=" * 60)
     
-    # Create application
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
@@ -553,22 +551,19 @@ def main():
     )
 
 if __name__ == "__main__":
-    # Ensure correct execution permissions on the script itself if run manually
     if not os.access(__file__, os.X_OK):
         try:
-            os.chmod(__file__, 0o755) # Add executable permission
+            os.chmod(__file__, 0o755) 
         except Exception as e:
-            pass # Ignore if it fails
+            pass
     main()
-
 PYEOF
-# --- End of the main bot.py content ---
 
 # Make bot executable
 chmod +x bot.py
 
 # ============================================
-# STEP 7: Create Systemd Service (Same as before, still reliable)
+# STEP 7: Create Systemd Service
 # ============================================
 print_status "Creating systemd service..."
 
@@ -596,11 +591,10 @@ systemctl daemon-reload
 systemctl enable telegram-media-bot.service
 
 # ============================================
-# STEP 8: Create Management Scripts (Same as before)
+# STEP 8: Create Management Scripts
 # ============================================
 print_status "Creating management scripts..."
 
-# ... (Scripts start-bot.sh, stop-bot.sh, restart-bot.sh, bot-status.sh, bot-logs.sh remain the same) ...
 cat > start-bot.sh << 'EOF'
 #!/bin/bash
 cd /opt/telegram-media-bot
@@ -643,13 +637,13 @@ sleep 3
 # ============================================
 echo ""
 echo "=============================================="
-echo "🎉 INSTALLATION COMPLETE (V8)"
+echo "🎉 INSTALLATION COMPLETE (V9)"
 echo "=============================================="
 echo "📁 Directory: /opt/telegram-media-bot"
 echo "🤖 Bot token saved in: .env"
 echo "📝 Logs: logs/bot.log"
 echo ""
-echo "💡 *نکته مهم:* برای لینک‌هایی که خطای 403 (Forbidden) می‌دهند (مثل Pinterest/Reddit)، لطفاً فایل کوکی‌های خود را در مسیر زیر قرار دهید:"
+echo "💡 *IMPORTANT:* For links giving 403 (Forbidden) errors (like Pinterest/Reddit), place your cookies file here:"
 echo "🍪 /opt/telegram-media-bot/cookies/cookies.txt"
 echo ""
 echo "🚀 TO START USING:"
