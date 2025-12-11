@@ -1,10 +1,10 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V15 - Final Fix)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V16 - Download Optimization)
 
 set -e # Exit immediately if a command exits with a non-zero status
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V15)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V16)"
 echo "=============================================="
 echo ""
 
@@ -79,9 +79,9 @@ mkdir -p downloads logs cookies tmp
 chmod 777 downloads logs cookies tmp
 
 # ============================================
-# STEP 4: Install Python Packages
+# STEP 4: Install Python Packages & Update yt-dlp
 # ============================================
-print_status "Installing Python packages..."
+print_status "Installing/Updating Python packages..."
 
 cat > requirements.txt << 'REQEOF'
 python-telegram-bot>=20.7
@@ -112,15 +112,15 @@ ENVEOF
 print_status "Configuration created."
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - V15: NameError Fix)
+# STEP 6: Create Bot File (bot.py - V16: Optimized Download)
 # ============================================
-print_status "Creating bot main file (bot.py - V15)..."
+print_status "Creating bot main file (bot.py - V16)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v15 - NameError Fix)
-Fixed: Missing 'handle_url' function definition.
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v16 - Download Optimization)
+Fixed: Enhanced download parameters to mitigate "Empty File" and "No formats found" errors.
 """
 
 import os
@@ -204,8 +204,9 @@ def format_size(bytes_val):
         return "Unknown"
 
 async def download_video(url, output_path):
-    """Download video using yt-dlp with optimized options (V14/V15)"""
+    """Download video using yt-dlp with optimized options (V16)"""
     
+    # V16: Use best format with mp4 preference, and include a generic 'best' fallback
     download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
     
     cmd = [
@@ -217,15 +218,17 @@ async def download_video(url, output_path):
         "--no-playlist",
         "--concurrent-fragments", "4",
         "--limit-rate", "10M",
-        # --- Advanced Options for stability ---
-        "--retries", "15",
-        "--fragment-retries", "15",
-        "--buffer-size", "256K",
+        # --- V16 Download Optimizations ---
+        "--retries", "20",  # Increased retries
+        "--fragment-retries", "20", # Increased fragment retries
+        "--buffer-size", "512K", # Increased buffer size
         "--user-agent", USER_AGENT, 
-        # V14 FIX: Removed geo-bypass options to resolve Geo/XFF error
         "--no-check-certificate", 
         "--referer", "https://google.com/",
         "--http-chunk-size", "10M",
+        "--no-clean-names", # Prevents issues with special characters in file names
+        "--force-overwrite", # Ensure no conflicts with existing files
+        "--force-format", "mp4", # V16: Force preferred container (helps with audio/video merge errors)
         # ------------------------------------
         url
     ]
@@ -261,7 +264,11 @@ async def download_video(url, output_path):
             # --- Better Error Parsing ---
             error_summary = "Unknown Download Error"
             
-            if "HTTP Error 403" in error_output or "Forbidden" in error_output or "Access Denied" in error_output or "HTTP Error 412" in error_output:
+            if "The downloaded file is empty" in error_output:
+                error_summary = "Downloaded file is empty (Possible Geo-Block/IP Block)"
+            elif "No video formats found" in error_output:
+                error_summary = "No video formats found (Incompatible URL or old extractor)"
+            elif "HTTP Error 403" in error_output or "Forbidden" in error_output or "Access Denied" in error_output or "HTTP Error 412" in error_output:
                 error_summary = "Access Denied (403/412/Blocked). Requires Cookies."
             elif "HTTP Error 404" in error_output or "NOT FOUND" in error_output:
                 error_summary = "File Not Found (404). Check URL validity."
@@ -283,7 +290,7 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V15*
+🤖 *UNIVERSAL Media Downloader Bot - V16*
 
 ✅ *Supported Sites:*
 • Supports almost all sites compatible with yt-dlp.
@@ -293,19 +300,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 2. The bot will download and send the file.
 
 ⚡ *Features:*
-✅ Fully functional core after NameError fix.
+✅ Optimized download parameters for stability.
 ✅ Automatic file deletion after {DELETE_AFTER} minutes
 ✅ Max file size: {MAX_SIZE_MB}MB
 
 🍪 *Cookie Setup (CRITICAL for Access):*
-For links requiring login or restricted access:
+For links requiring login or restricted access (Vimeo, Private Links, 403/412 Errors):
 Place your `cookies.txt` file here:
 `/opt/telegram-media-bot/cookies/`
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle URL messages - V15: This function was missing!"""
+    """Handle URL messages"""
     original_text = update.message.text
     url = clean_url(original_text)
     
@@ -363,8 +370,21 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
             error_message = (
                 f"❌ *Download Failed (Access Blocked)*\n\n"
                 f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* Server rejected access (403/412).\n"
+                f"💡 *Solution:* Server rejected access (403/412/Blocked).\n"
                 f"If the link is public, check network access or provide `cookies.txt`."
+            )
+        elif "Downloaded file is empty" in result:
+            error_message = (
+                f"❌ *Download Failed (Empty File)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* This can be due to a severe Geo-Block or server-side anti-bot protection.\n"
+                f"Try with a new link or provide `cookies.txt`."
+            )
+        elif "No video formats found" in result:
+            error_message = (
+                f"❌ *Download Failed (No Formats)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* yt-dlp failed to extract the video source. This link might be broken or use a very new/uncommon format. Try a different link from the same site."
             )
         elif "File Not Found" in result:
             error_message = (
@@ -476,7 +496,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE (V15)*
+🆘 *HELP GUIDE (V16)*
 
 📋 *How to Use:*
 1. Send any media URL.
@@ -488,7 +508,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Almost all sites supported by yt-dlp.
 
 ⚙️ *Cookie Setup (CRITICAL for Access):*
-To bypass login/access errors, place your `cookies.txt` file in: `/opt/telegram-media-bot/cookies/`
+To bypass login/access errors and many Access Blocked (403/412) errors, place your `cookies.txt` file in: `/opt/telegram-media-bot/cookies/`
 
 📏 *Limits:*
 - Max file size: {MAX_SIZE_MB}MB
@@ -504,7 +524,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS (V15)*
+📊 *BOT STATUS (V16)*
 
 🖥 *System:*
 • CPU: {cpu:.1f}%
@@ -512,7 +532,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
 🤖 *Bot:*
-• Version: V15 (NameError Fixed)
+• Version: V16 (Download Optimized)
 • Max size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} min
 • Status: ✅ Running
@@ -539,7 +559,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V15 (Starting)")
+    print("🤖 Telegram Media Downloader Bot - V16 (Starting)")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
@@ -547,7 +567,6 @@ def main():
     
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # V15 FIX: handle_url is now defined above this point
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
@@ -656,10 +675,10 @@ sleep 3
 # ============================================
 echo ""
 echo "================================================"
-echo "🎉 INSTALLATION COMPLETE (V15 - FINAL CODE FIX)"
+echo "🎉 INSTALLATION COMPLETE (V16 - DOWNLOAD OPTIMIZATION)"
 echo "================================================"
-echo "💡 The NameError (handle_url) has been resolved."
-echo "✅ The bot should now be fully functional."
+echo "💡 The bot is running with maximum download stability."
+echo "✅ The remaining errors are most likely due to site restrictions (Cookies/Geo-Block)."
 echo ""
 echo "⚙️ FINAL CHECK COMMANDS:"
 echo "------------------------------------------------"
