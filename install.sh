@@ -1,7 +1,7 @@
 #!/bin/bash
 # Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V18 - Final Stability)
 
-set -e 
+set -e # Exit immediately if a command exits with a non-zero status
 
 echo "=============================================="
 echo "🤖 Telegram Media Downloader Bot - Universal (V18)"
@@ -9,37 +9,119 @@ echo "=============================================="
 echo ""
 
 # Colors
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
+
+# Helper functions
 print_status() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_error() { echo -e "${RED}[✗]${NC} $1"; }
 
-# Check root and ask for token (omitted for brevity, assume user has this)
+# Check root
+if [ "$EUID" -ne 0 ]; then
+    print_error "لطفاً با دسترسی روت اجرا کنید: sudo bash install.sh"
+    exit 1
+fi
 
-print_status "Starting installation process..."
+# Ask for bot token
+echo "🔑 توکن ربات خود را از @BotFather وارد کنید:"
+read -p "📝 توکن ربات: " BOT_TOKEN
+
+if [ -z "$BOT_TOKEN" ]; then
+    print_error "وارد کردن توکن ربات ضروری است!"
+    exit 1
+fi
+
+print_status "شروع فرآیند نصب..."
 
 # ============================================
-# STEP 1 to 5: System, Python, FFmpeg, Directory, Configuration (No changes)
-# ... (Standard installation steps) ...
+# STEP 1: System Update & Essential Tools
 # ============================================
+print_status "به‌روزرسانی بسته‌های سیستمی..."
+apt-get update -y
+apt-get upgrade -y
 
-# Assuming the required directories and packages are installed...
+print_status "نصب ابزارهای ضروری..."
+apt-get install -y curl wget nano htop screen unzip pv git
+
+# ============================================
+# STEP 2: Install Python, PIP, and FFmpeg
+# ============================================
+print_status "بررسی نصب Python..."
+
+if ! command -v python3 &> /dev/null; then
+    print_status "نصب Python3..."
+    apt-get install -y python3
+fi
+
+if ! command -v pip3 &> /dev/null; then
+    print_status "نصب Python3-PIP..."
+    apt-get install -y python3-pip
+fi
+
+print_status "نصب FFmpeg..."
+apt-get install -y ffmpeg
+
+# FIX: Remove system's youtube-dl/yt-dlp to prevent conflicts with pip version
+print_status "حذف بسته‌های yt-dlp/youtube-dl سیستمی (برای جلوگیری از تداخل)..."
+apt-get remove -y youtube-dl yt-dlp 2>/dev/null || true
+
+
+# ============================================
+# STEP 3: Create Project Structure
+# ============================================
+print_status "ایجاد دایرکتوری پروژه..."
 INSTALL_DIR="/opt/telegram-media-bot"
+mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
-print_status "Ensuring latest yt-dlp version and dependencies..."
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt # Ensure requirements are met
+
+mkdir -p downloads logs cookies tmp
+chmod 777 downloads logs cookies tmp
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - V18: Final Download Stabilization)
+# STEP 4: Install Python Packages & Update yt-dlp
 # ============================================
-print_status "Creating bot main file (bot.py - V18)..."
+print_status "نصب/به‌روزرسانی بسته‌های Python..."
+
+cat > requirements.txt << 'REQEOF'
+python-telegram-bot>=20.7
+python-dotenv>=1.0.0
+yt-dlp>=2024.4.9
+aiofiles>=23.2.1
+requests>=2.31.0
+psutil>=5.9.8
+REQEOF
+
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+
+print_status "بسته‌های اصلی با موفقیت نصب شدند."
+
+# ============================================
+# STEP 5: Create Configuration
+# ============================================
+print_status "ایجاد فایل‌های پیکربندی..."
+
+cat > .env << ENVEOF
+BOT_TOKEN=${BOT_TOKEN}
+MAX_FILE_SIZE=2000
+DELETE_AFTER_MINUTES=2
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+ENVEOF
+
+print_status "پیکربندی ایجاد شد."
+
+# ============================================
+# STEP 6: Create Bot File (bot.py - V18: Final Stability)
+# ============================================
+print_status "ایجاد فایل اصلی ربات (bot.py - V18)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
 Telegram Media Downloader Bot - UNIVERSAL VERSION (v18 - Final Stability & Format Fallback)
 """
-# (The entire content of bot.py from V18 is here, unchanged)
+
 import os
 import sys
 import logging
@@ -123,7 +205,7 @@ def format_size(bytes_val):
 async def download_video(url, output_path):
     """Download video using yt-dlp with optimized options (V18)"""
     
-    # V18: Prioritize MP4 (video+audio), if fails, fall back to best overall stream (which might be single stream)
+    # V18: Prioritize MP4 (video+audio), if fails, fall back to best overall stream
     download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
     
     cmd = [
@@ -207,21 +289,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = f"""
 🤖 *UNIVERSAL Media Downloader Bot - V18*
 
-✅ *Supported Sites:*
-• Supports almost all sites compatible with yt-dlp.
+✅ *سایت‌های پشتیبانی شده:*
+• تقریباً تمام سایت‌های سازگار با yt-dlp.
 
-📝 *How to Use:*
-1. Send any media URL.
-2. The bot will download and send the file.
+📝 *نحوه استفاده:*
+1. هر URL رسانه‌ای را بفرستید.
+2. ربات فایل را دانلود و ارسال می‌کند.
 
-⚡ *Features:*
-✅ Maximum download stability (Confirmed working for 6+ sites).
-✅ Automatic file deletion after {DELETE_AFTER} minutes
-✅ Max file size: {MAX_FILE_SIZE}MB
+⚡ *ویژگی‌ها:*
+✅ حداکثر پایداری دانلود.
+✅ حذف خودکار فایل‌ها بعد از {DELETE_AFTER} دقیقه
+✅ حداکثر حجم فایل: {MAX_SIZE_MB}MB
 
-🍪 *Cookie Setup (CRITICAL for Access):*
-For links requiring login or restricted access (Vimeo, Private Links, 403/412 Errors):
-Place your `cookies.txt` file here:
+🍪 *تنظیم کوکی (بسیار مهم برای دسترسی):*
+برای لینک‌هایی که نیاز به ورود یا دسترسی محدود دارند (Vimeo, لینک‌های خصوصی, خطاهای 403/412):
+فایل `cookies.txt` خود را در مسیر زیر قرار دهید:
 `/opt/telegram-media-bot/cookies/`
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
@@ -233,7 +315,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not url:
         await update.message.reply_text(
-            "❌ *Invalid URL*\nPlease send a valid URL starting with http:// or https://",
+            "❌ *URL نامعتبر*\nلطفاً یک URL معتبر که با http:// یا https:// شروع می‌شود، بفرستید.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -248,10 +330,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Initial message
     msg = await update.message.reply_text(
-        f"🔗 *Processing URL*\n\n"
-        f"Site: *{site.upper()}*\n"
+        f"🔗 *در حال پردازش URL*\n\n"
+        f"سایت: *{site.upper()}*\n"
         f"URL: `{url[:50]}...`\n\n"
-        f"Starting download...",
+        f"شروع دانلود...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -263,9 +345,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Download
     await msg.edit_text(
-        f"📥 *Downloading...*\n\n"
-        f"Site: {site.upper()}\n"
-        f"Please wait (Max 8 minutes)...",
+        f"📥 *در حال دانلود...*\n\n"
+        f"سایت: {site.upper()}\n"
+        f"لطفاً صبر کنید (حداکثر 8 دقیقه)...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -276,45 +358,45 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if "Login Required" in result:
              error_message = (
-                f"❌ *Download Failed (Login Required)*\n\n"
-                f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* This link is private or requires login.\n"
-                f"Please place your `cookies.txt` file in `/opt/telegram-media-bot/cookies/`."
+                f"❌ *دانلود ناموفق (نیاز به ورود)*\n\n"
+                f"خطا: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *راه‌حل:* این لینک خصوصی است یا نیاز به ورود دارد.\n"
+                f"لطفاً فایل `cookies.txt` خود را در مسیر `/opt/telegram-media-bot/cookies/` قرار دهید."
             )
         elif "Access Denied" in result:
             error_message = (
-                f"❌ *Download Failed (Access Blocked)*\n\n"
-                f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* Server rejected access (403/412/Blocked).\n"
-                f"If the link is public, check network access or provide `cookies.txt`."
+                f"❌ *دانلود ناموفق (دسترسی مسدود شده)*\n\n"
+                f"خطا: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *راه‌حل:* سرور دسترسی را رد کرده است (403/412/مسدود شده).\n"
+                f"اگر لینک عمومی است، دسترسی شبکه را بررسی کنید یا `cookies.txt` را ارائه دهید."
             )
         elif "Downloaded file is empty" in result:
             error_message = (
-                f"❌ *Download Failed (Empty File)*\n\n"
-                f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* This can be due to a severe Geo-Block or server-side anti-bot protection.\n"
-                f"Try with a new link or provide `cookies.txt`."
+                f"❌ *دانلود ناموفق (فایل خالی)*\n\n"
+                f"خطا: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *راه‌حل:* این ممکن است به دلیل مسدودسازی شدید جغرافیایی یا محافظت ضد ربات سرور باشد.\n"
+                f"با یک لینک جدید یا با `cookies.txt` دوباره امتحان کنید."
             )
         elif "No video formats found" in result:
             error_message = (
-                f"❌ *Download Failed (No Formats)*\n\n"
-                f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* yt-dlp failed to extract the video source. This link might be broken or use a very new/uncommon format. Try a different link from the same site."
+                f"❌ *دانلود ناموفق (فرمت پیدا نشد)*\n\n"
+                f"خطا: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *راه‌حل:* yt-dlp نتوانست منبع ویدیو را استخراج کند. لینک ممکن است خراب باشد یا از فرمت جدید/غیرمعمولی استفاده کند. یک لینک دیگر از همان سایت امتحان کنید."
             )
         elif "File Not Found" in result:
             error_message = (
-                f"❌ *Download Failed (404)*\n\n"
-                f"Error: `{result.replace('Download error: ', '')}`\n\n"
-                f"💡 *Solution:* The provided URL does not point to an existing file/page."
+                f"❌ *دانلود ناموفق (404)*\n\n"
+                f"خطا: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *راه‌حل:* URL داده شده به یک فایل/صفحه موجود اشاره نمی‌کند."
             )
         else:
              error_message = (
-                f"❌ *Download Failed*\n\n"
-                f"Error: `{result}`\n\n"
-                f"Possible reasons:\n"
-                f"• URL is inaccessible or broken.\n"
-                f"• Cookies file (`cookies.txt`) is required.\n"
-                f"• Content is restricted (Geo/Private)."
+                f"❌ *دانلود ناموفق*\n\n"
+                f"خطا: `{result}`\n\n"
+                f"دلایل احتمالی:\n"
+                f"• URL غیرقابل دسترسی یا خراب است.\n"
+                f"• فایل کوکی (`cookies.txt`) مورد نیاز است.\n"
+                f"• محتوا محدود شده است (جغرافیایی/خصوصی)."
             )
 
         await msg.edit_text(error_message, parse_mode=ParseMode.MARKDOWN)
@@ -326,7 +408,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not downloaded_files:
         await msg.edit_text(
-            "❌ Download completed but the final file was not found.",
+            "❌ دانلود تکمیل شد اما فایل نهایی پیدا نشد.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -342,19 +424,19 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p.unlink()
         
         await msg.edit_text(
-            f"❌ *File Too Large*\n\n"
-            f"Size: {format_size(file_size)}\n"
-            f"Limit: {MAX_SIZE_MB}MB",
+            f"❌ *حجم فایل بیش از حد مجاز است*\n\n"
+            f"حجم: {format_size(file_size)}\n"
+            f"محدودیت: {MAX_SIZE_MB}MB",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
     # Upload to Telegram
     await msg.edit_text(
-        f"📤 *Uploading...*\n\n"
-        f"File: {file_path.name}\n"
-        f"Size: {format_size(file_size)}\n\n"
-        f"This may take a moment...",
+        f"📤 *در حال آپلود...*\n\n"
+        f"فایل: {file_path.name}\n"
+        f"حجم: {format_size(file_size)}\n\n"
+        f"ممکن است کمی طول بکشد...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -362,10 +444,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(file_path, 'rb') as file:
             file_ext = file_path.suffix.lower()
             caption_text = (
-                f"✅ *Download Complete!*\n\n"
-                f"Site: {site.upper()}\n"
-                f"Size: {format_size(file_size)}\n"
-                f"Auto-deletes in {DELETE_AFTER} minutes"
+                f"✅ *دانلود تکمیل شد!*\n\n"
+                f"سایت: {site.upper()}\n"
+                f"حجم: {format_size(file_size)}\n"
+                f"حذف خودکار در {DELETE_AFTER} دقیقه"
             )
             
             # Smart media type detection
@@ -383,7 +465,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Final status update
         await msg.edit_text(
-            f"🎉 *SUCCESS!*",
+            f"🎉 *موفقیت‌آمیز!*",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -403,31 +485,31 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as upload_error:
         logger.error(f"Upload error: {upload_error}")
         await msg.edit_text(
-            f"❌ *Upload Failed*\n\n"
-            f"Error: {str(upload_error)[:200]}",
+            f"❌ *آپلود ناموفق*\n\n"
+            f"خطا: {str(upload_error)[:200]}",
             parse_mode=ParseMode.MARKDOWN
         )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE (V18)*
+🆘 *راهنمای کمک (V18)*
 
-📋 *How to Use:*
-1. Send any media URL.
-2. The bot automatically handles the download.
-3. Receive the file in Telegram.
-4. Files are auto-deleted after {DELETE_AFTER} minutes.
+📋 *نحوه استفاده:*
+1. هر URL رسانه‌ای را بفرستید.
+2. ربات به صورت خودکار دانلود را انجام می‌دهد.
+3. فایل را در تلگرام دریافت کنید.
+4. فایل‌ها {DELETE_AFTER} دقیقه بعد حذف می‌شوند.
 
-🌐 *Supported Sites:*
-- Almost all sites supported by yt-dlp.
+🌐 *سایت‌های پشتیبانی شده:*
+- تقریباً تمام سایت‌های پشتیبانی شده توسط yt-dlp.
 
-⚙️ *Cookie Setup (CRITICAL for Access):*
-To bypass login/access errors and many Access Blocked (403/412) errors, place your `cookies.txt` file in: `/opt/telegram-media-bot/cookies/`
+⚙️ *تنظیم کوکی (CRITICAL for Access):*
+برای دور زدن خطاهای ورود/دسترسی و بسیاری از خطاهای دسترسی مسدود شده (403/412)، فایل `cookies.txt` خود را در: `/opt/telegram-media-bot/cookies/` قرار دهید.
 
-📏 *Limits:*
-- Max file size: {MAX_FILE_SIZE}MB
-- Auto-delete: {DELETE_AFTER} minutes
+📏 *محدودیت‌ها:*
+- حداکثر حجم فایل: {MAX_SIZE_MB}MB
+- حذف خودکار: {DELETE_AFTER} دقیقه
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -439,23 +521,23 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS (V18)*
+📊 *وضعیت ربات (V18)*
 
-🖥 *System:*
+🖥 *سیستم:*
 • CPU: {cpu:.1f}%
-• RAM: {memory.percent:.1f}% ({format_size(memory.available)} Free)
-• Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
+• RAM: {memory.percent:.1f}% ({format_size(memory.available)} آزاد)
+• دیسک: {disk.percent:.1f}% ({format_size(disk.free)} آزاد)
 
-🤖 *Bot:*
-• Version: V18 (Final Stability)
-• Max size: {MAX_FILE_SIZE}MB
-• Auto-delete: {DELETE_AFTER} min
-• Status: ✅ Running
+🤖 *ربات:*
+• نسخه: V18 (پایداری نهایی)
+• حداکثر حجم: {MAX_SIZE_MB}MB
+• حذف خودکار: {DELETE_AFTER} دقیقه
+• وضعیت: ✅ در حال اجرا
 
-💡 *Quick Commands:*
-/start - Welcome message
-/help - Guide
-/status - Bot status
+💡 *دستورات سریع:*
+/start - پیام خوشامدگویی
+/help - راهنما
+/status - وضعیت ربات
 """
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -465,7 +547,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "❌ An internal error occurred. Please try again.",
+                "❌ یک خطای داخلی رخ داده است. لطفاً دوباره تلاش کنید.",
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
@@ -474,10 +556,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V18 (Starting)")
+    print("🤖 Telegram Media Downloader Bot - V18 (در حال شروع)")
     print("=" * 60)
-    print(f"Token: {BOT_TOKEN[:20]}...")
-    print(f"Max size: {MAX_FILE_SIZE}MB")
+    print(f"توکن: {BOT_TOKEN[:20]}...")
+    print(f"حداکثر حجم: {MAX_SIZE_MB}MB")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -488,7 +570,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     app.add_error_handler(error_handler)
     
-    print("✅ Bot polling started...")
+    print("✅ ربات شروع به نظرسنجی کرد...")
     
     try:
         app.run_polling(
@@ -497,7 +579,7 @@ def main():
             timeout=30
         )
     except Exception as e:
-        logger.critical(f"Bot failed to start polling: {e}")
+        logger.critical(f"ربات نتوانست شروع به نظرسنجی کند: {e}")
         sys.exit(1)
 
 
@@ -509,6 +591,97 @@ if __name__ == "__main__":
             pass
     main()
 PYEOF
-# ... (Systemd and management scripts creation) ...
-print_status "Configuration and Service setup complete."
-# Final service commands (Start, Enable) are executed here.
+
+# Make bot executable
+chmod +x bot.py
+
+# ============================================
+# STEP 7: Create Systemd Service
+# ============================================
+print_status "ایجاد سرویس systemd..."
+# Find the exact path of python3
+PYTHON_PATH=$(which python3)
+
+cat > /etc/systemd/system/telegram-media-bot.service << SERVICEEOF
+[Unit]
+Description=Telegram Media Downloader Bot
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=/opt/telegram-media-bot
+ExecStart=${PYTHON_PATH} /opt/telegram-media-bot/bot.py
+StandardOutput=append:/opt/telegram-media-bot/logs/bot.log
+StandardError=append:/opt/telegram-media-bot/logs/bot-error.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+systemctl daemon-reload
+systemctl enable telegram-media-bot.service
+
+# ============================================
+# STEP 8: Create Management Scripts
+# ============================================
+print_status "ایجاد اسکریپت‌های مدیریت..."
+
+cat > start-bot.sh << 'EOF'
+#!/bin/bash
+systemctl start telegram-media-bot.service
+echo "Bot started"
+EOF
+
+cat > stop-bot.sh << 'EOF'
+#!/bin/bash
+systemctl stop telegram-media-bot.service
+echo "Bot stopped"
+EOF
+
+cat > restart-bot.sh << 'EOF'
+#!/bin/bash
+systemctl restart telegram-media-bot.service
+echo "Bot restarted"
+EOF
+
+cat > bot-status.sh << 'EOF'
+#!/bin/bash
+systemctl status telegram-media-bot.service
+EOF
+
+cat > bot-logs.sh << 'EOF'
+#!/bin/bash
+tail -f /opt/telegram-media-bot/logs/bot.log
+EOF
+
+chmod +x *.sh
+
+# ============================================
+# STEP 9: Start Service
+# ============================================
+print_status "شروع سرویس ربات..."
+systemctl start telegram-media-bot.service
+sleep 3
+
+# ============================================
+# STEP 10: Show Final Instructions
+# ============================================
+echo ""
+echo "================================================"
+echo "🎉 نصب تکمیل شد (V18 - پایداری نهایی)"
+echo "================================================"
+echo "💡 ربات اکنون حداکثر پایداری دانلود را دارد."
+echo "✅ برای حل خطاهای دسترسی (Access Denied / Login Required)، باید فایل cookies.txt را قرار دهید."
+echo ""
+echo "⚙️ دستورات نهایی کنترل:"
+echo "------------------------------------------------"
+echo "A) وضعیت سرویس:"
+echo "   systemctl status telegram-media-bot"
+echo "B) مشاهده لحظه‌ای لاگ‌ها:"
+echo "   tail -f /opt/telegram-media-bot/logs/bot.log"
+echo "------------------------------------------------"
+echo "================================================"
