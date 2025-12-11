@@ -1,11 +1,11 @@
 #!/bin/bash
-# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V9 - English)
+# Telegram Media Downloader Bot - Complete Installer for Fresh Servers (V11 - English)
 # Compatible with Ubuntu/Debian fresh installations
 
 set -e # Exit on error
 
 echo "=============================================="
-echo "🤖 Telegram Media Downloader Bot - Universal (V9)"
+echo "🤖 Telegram Media Downloader Bot - Universal (V11)"
 echo "=============================================="
 echo ""
 
@@ -53,7 +53,6 @@ apt-get install -y curl wget nano htop screen unzip pv git
 # ============================================
 print_status "Checking Python installation..."
 
-# Install Python if not exists
 if ! command -v python3 &> /dev/null; then
     print_status "Installing Python3..."
     apt-get install -y python3
@@ -65,11 +64,9 @@ if ! command -v pip3 &> /dev/null; then
     apt-get install -y python3-pip
 fi
 
-# Check Python version
 PYTHON_VERSION=$(python3 --version 2>&1)
 print_status "Found $PYTHON_VERSION"
 
-# Install FFmpeg
 print_status "Installing FFmpeg..."
 apt-get install -y ffmpeg
 
@@ -81,16 +78,14 @@ INSTALL_DIR="/opt/telegram-media-bot"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# Create directories
 mkdir -p downloads logs cookies tmp
-chmod 777 downloads logs cookies tmp # Set full permissions
+chmod 777 downloads logs cookies tmp
 
 # ============================================
 # STEP 4: Install Python Packages (Updated versions)
 # ============================================
 print_status "Installing Python packages..."
 
-# Create requirements file with LATEST versions
 cat > requirements.txt << 'REQEOF'
 python-telegram-bot>=20.7
 python-dotenv>=1.0.0
@@ -100,7 +95,6 @@ requests>=2.31.0
 psutil>=5.9.8
 REQEOF
 
-# Install packages
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 
@@ -111,27 +105,26 @@ print_status "✅ Core packages installed"
 # ============================================
 print_status "Creating configuration files..."
 
-# Create .env file with advanced settings for yt-dlp
 cat > .env << ENVEOF
 BOT_TOKEN=${BOT_TOKEN}
 MAX_FILE_SIZE=2000
 DELETE_AFTER_MINUTES=2
-# Added for yt-dlp to bypass some blocks
+# User Agent improved for stability and bypassing blocks like 412 on BiliBili
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ENVEOF
 
 print_status "✅ Configuration created"
 
 # ============================================
-# STEP 6: Create Bot File (bot.py - English and Error-Optimized)
+# STEP 6: Create Bot File (bot.py - V11: Optimized Format and Access)
 # ============================================
-print_status "Creating bot main file (bot.py)..."
+print_status "Creating bot main file (bot.py - V11)..."
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Telegram Media Downloader Bot - UNIVERSAL VERSION (v9 - Optimized for Access/Errors)
-Fixes common installation errors and improves download stability.
+Telegram Media Downloader Bot - UNIVERSAL VERSION (v11 - Optimized for Format and Access Errors)
+Fixes common download failures for Pinterest, Reddit, Vimeo, and BiliBili.
 """
 
 import os
@@ -161,7 +154,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DELETE_AFTER = int(os.getenv("DELETE_AFTER_MINUTES", "2"))
 MAX_SIZE_MB = int(os.getenv("MAX_FILE_SIZE", "2000"))
-USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; My-TG-Bot/1.0)")
+USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 if not BOT_TOKEN:
     print("ERROR: Please set BOT_TOKEN in .env file")
@@ -216,63 +209,74 @@ def format_size(bytes_val):
         return "Unknown"
 
 async def download_video(url, output_path):
-    """Download video using yt-dlp with advanced options"""
+    """Download video using yt-dlp with advanced options and format fallback"""
+    
+    # V11 Fix: Removed height filter to fix Pinterest/Reddit format error
+    # We prioritize combined format, then just best if combination fails.
+    download_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+    
+    cmd = [
+        "yt-dlp",
+        "-f", download_format, 
+        "-o", output_path,
+        "--no-warnings",
+        "--ignore-errors",
+        "--no-playlist",
+        "--concurrent-fragments", "4",
+        "--limit-rate", "10M",
+        # --- Advanced Options for stability and bypassing blocks (V11) ---
+        "--retries", "15",            # Increased retries for flaky connections/BiliBili 412
+        "--fragment-retries", "15",
+        "--buffer-size", "256K",
+        "--user-agent", USER_AGENT, 
+        "--geo-bypass-country", "US,DE,GB",
+        "--geo-bypass-resume", 
+        "--no-check-certificate", 
+        "--referer", "https://google.com/", # Added referer for better access (e.g., BiliBili 412)
+        "--http-chunk-size", "10M",
+        # ----------------------------------------------------------------
+        url
+    ]
+    
+    # Add cookies if available
+    cookies_file = "cookies/cookies.txt"
+    if os.path.exists(cookies_file):
+        cmd.extend(["--cookies", cookies_file])
+    
+    logger.info(f"Running yt-dlp for: {url}")
+    
     try:
-        cmd = [
-            "yt-dlp",
-            "-f", "best[height<=720]/best", 
-            "-o", output_path,
-            "--no-warnings",
-            "--ignore-errors",
-            "--no-playlist",
-            "--concurrent-fragments", "2",
-            "--limit-rate", "5M",
-            # --- Advanced Options for stability and bypassing blocks ---
-            "--retries", "3", 
-            "--buffer-size", "128K", 
-            "--user-agent", USER_AGENT, 
-            "--geo-bypass", 
-            "--no-check-certificate", 
-            # -----------------------------------------------------------
-            url
-        ]
-        
-        # Add cookies if available
-        cookies_file = "cookies/cookies.txt"
-        if os.path.exists(cookies_file):
-            cmd.extend(["--cookies", cookies_file])
-        
-        logger.info(f"Running yt-dlp for: {url}")
-        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         
-        # Increased timeout to 6.6 minutes (400 seconds)
+        # Increased timeout to 8 minutes (480 seconds)
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=400) 
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=480) 
         except asyncio.TimeoutError:
             process.kill()
             logger.error(f"Download Timeout: {url}")
-            return False, "Timeout (6.6 minutes) - Try again later or check URL."
+            return False, "Timeout (8 minutes) - Server might be too slow or file too large."
         
         if process.returncode == 0:
             return True, "Success"
         else:
             error_output = stderr.decode('utf-8', errors='ignore')
             
-            # --- Better Error Parsing ---
+            # --- Better Error Parsing (V11) ---
             error_summary = "Unknown Download Error"
-            if "HTTP Error 403" in error_output or "Forbidden" in error_output or "Blocked" in error_output:
-                error_summary = "Access Denied (403/Blocked). Try adding cookies.txt."
+            
+            if "HTTP Error 403" in error_output or "Forbidden" in error_output or "Access Denied" in error_output or "HTTP Error 412" in error_output:
+                error_summary = "Access Denied (403/412/Blocked). Requires Cookies or Geo-bypass failed."
             elif "HTTP Error 404" in error_output or "NOT FOUND" in error_output:
                 error_summary = "File Not Found (404). Check URL validity."
-            elif "KeyError" in error_output:
-                error_summary = "Extractor Error (KeyError). Try updating yt-dlp."
+            elif "logged-in" in error_output or "--cookies" in error_output:
+                error_summary = "Login Required (Vimeo/Private). You MUST provide cookies.txt."
+            elif "Requested format is not available" in error_output:
+                error_summary = "Format Not Found. The link might be broken or not a video."
             else:
-                 # Attempt to extract the last meaningful error line from yt-dlp
                 lines = [line.strip() for line in error_output.split('\n') if line.strip()]
                 error_summary = lines[-1][:200] if lines else "Unknown Download Error"
 
@@ -286,7 +290,7 @@ async def download_video(url, output_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     welcome = f"""
-🤖 *UNIVERSAL Media Downloader Bot - V9*
+🤖 *UNIVERSAL Media Downloader Bot - V11*
 
 ✅ *Supported Sites:*
 • YouTube, TikTok, Instagram
@@ -297,14 +301,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 1. Send any media URL.
 2. The bot will download and send the file.
 
-⚡ *Features:*
-✅ Automatic and fast downloading
-✅ File size display
+⚡ *Features (V11 Update):*
+✅ Optimized format detection (Fixes Pinterest/Reddit format error)
+✅ Enhanced access handling (Better fix for BiliBili 412/403)
 ✅ Automatic file deletion after {DELETE_AFTER} minutes
 ✅ Max file size: {MAX_SIZE_MB}MB
 
-🍪 *Cookie Setup:*
-For sites with access restrictions (like Pinterest/Reddit, often causing 403 errors), please place your `cookies.txt` file here:
+🍪 *Cookie Setup (CRITICAL for Vimeo/403/412):*
+For sites requiring login or access (Vimeo, Private content, BiliBili):
+Place your `cookies.txt` file here:
 `/opt/telegram-media-bot/cookies/`
 """
     await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
@@ -348,7 +353,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text(
         f"📥 *Downloading...*\n\n"
         f"Site: {site.upper()}\n"
-        f"Please wait...",
+        f"Please wait (Max 8 minutes)...",
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -356,15 +361,38 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # If download fails, report error with more details
     if not success:
-        await msg.edit_text(
-            f"❌ *Download Failed*\n\n"
-            f"Error: `{result}`\n\n"
-            f"Possible reasons:\n"
-            f"• URL is inaccessible.\n"
-            f"• Cookies file (`cookies.txt`) is required for this site.\n"
-            f"• Content is restricted (Geo/Private).",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        
+        if "Login Required" in result:
+             error_message = (
+                f"❌ *Download Failed (Login Required)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* This link is private or requires login (e.g., Vimeo).\n"
+                f"Please place your `cookies.txt` file in `/opt/telegram-media-bot/cookies/`."
+            )
+        elif "Access Denied" in result:
+            error_message = (
+                f"❌ *Download Failed (Access Blocked)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* Server rejected access (403/412).\n"
+                f"If the link is public, try again. If it is restricted, you need `cookies.txt`."
+            )
+        elif "File Not Found" in result:
+            error_message = (
+                f"❌ *Download Failed (404)*\n\n"
+                f"Error: `{result.replace('Download error: ', '')}`\n\n"
+                f"💡 *Solution:* The provided URL does not point to an existing file/page."
+            )
+        else:
+             error_message = (
+                f"❌ *Download Failed*\n\n"
+                f"Error: `{result}`\n\n"
+                f"Possible reasons:\n"
+                f"• URL is inaccessible or broken.\n"
+                f"• Cookies file (`cookies.txt`) is required.\n"
+                f"• Content is restricted (Geo/Private)."
+            )
+
+        await msg.edit_text(error_message, parse_mode=ParseMode.MARKDOWN)
         return
     
     # Find downloaded file
@@ -462,7 +490,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-🆘 *HELP GUIDE*
+🆘 *HELP GUIDE (V11)*
 
 📋 *How to Use:*
 1. Send any media URL.
@@ -471,10 +499,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 4. Files are auto-deleted after {DELETE_AFTER} minutes.
 
 🌐 *Supported Sites:*
-- Almost all sites supported by yt-dlp (e.g., YouTube, TikTok, Reddit, Pinterest, Vimeo).
+- Almost all sites supported by yt-dlp.
 
-⚙️ *Cookie Setup:*
-To bypass access errors (like 403 on Pinterest/Reddit), you need a `cookies.txt` file.
+⚙️ *Cookie Setup (CRITICAL for Access):*
+To bypass login/access errors (like Vimeo login or BiliBili 412), you need a `cookies.txt` file.
 Place it in: `/opt/telegram-media-bot/cookies/`
 
 📏 *Limits:*
@@ -491,7 +519,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage('/')
     
     status_text = f"""
-📊 *BOT STATUS*
+📊 *BOT STATUS (V11)*
 
 🖥 *System:*
 • CPU: {cpu:.1f}%
@@ -499,7 +527,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Disk: {disk.percent:.1f}% ({format_size(disk.free)} Free)
 
 🤖 *Bot:*
-• Version: V9 (Optimized)
+• Version: V11 (Format/Access Optimized)
 • Max size: {MAX_SIZE_MB}MB
 • Auto-delete: {DELETE_AFTER} min
 • Status: ✅ Running
@@ -526,7 +554,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Main function"""
     print("=" * 60)
-    print("🤖 Telegram Media Downloader Bot - V9")
+    print("🤖 Telegram Media Downloader Bot - V11 (Format/Access Optimized)")
     print("=" * 60)
     print(f"Token: {BOT_TOKEN[:20]}...")
     print(f"Max size: {MAX_SIZE_MB}MB")
@@ -637,13 +665,13 @@ sleep 3
 # ============================================
 echo ""
 echo "=============================================="
-echo "🎉 INSTALLATION COMPLETE (V9)"
+echo "🎉 INSTALLATION COMPLETE (V11)"
 echo "=============================================="
 echo "📁 Directory: /opt/telegram-media-bot"
 echo "🤖 Bot token saved in: .env"
 echo "📝 Logs: logs/bot.log"
 echo ""
-echo "💡 *IMPORTANT:* For links giving 403 (Forbidden) errors (like Pinterest/Reddit), place your cookies file here:"
+echo "💡 *IMPORTANT:* For links giving login/403/412 errors (like Vimeo, BiliBili), place your cookies file here:"
 echo "🍪 /opt/telegram-media-bot/cookies/cookies.txt"
 echo ""
 echo "🚀 TO START USING:"
